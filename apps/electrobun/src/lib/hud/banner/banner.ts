@@ -102,6 +102,7 @@ export class Banner {
   private minimapRenderer: MinimapRenderer | null = null;
   private onMinimapTeleport?: (mapId: number) => void;
   private onStatsToggle?: () => void;
+  private onMapToggle?: () => void;
 
   constructor(app: Application, displayHeight: number) {
     this.app = app;
@@ -221,6 +222,14 @@ export class Banner {
     if (statsBtn) {
       statsBtn.button.container.on('pointerdown', () => {
         this.onStatsToggle?.();
+      });
+    }
+
+    // Wire map button (index 4) to toggle callback
+    const mapBtn = this.iconButtons[4];
+    if (mapBtn) {
+      mapBtn.button.container.on('pointerdown', () => {
+        this.onMapToggle?.();
       });
     }
 
@@ -639,6 +648,10 @@ export class Banner {
 
   public setOnStatsToggle(callback: () => void): void {
     this.onStatsToggle = callback;
+  }
+
+  public setOnMapToggle(callback: () => void): void {
+    this.onMapToggle = callback;
   }
 
   public setStatsPressed(pressed: boolean): void {

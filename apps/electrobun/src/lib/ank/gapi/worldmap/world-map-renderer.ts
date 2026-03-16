@@ -30,6 +30,7 @@ interface WorldMapRendererConfig {
 
 export class WorldMapRenderer {
   private app: Application;
+  private root: Container;
   private worldContainer: Container;
   private mapContainer: Container;
   private hintsContainer: Container;
@@ -55,9 +56,14 @@ export class WorldMapRenderer {
 
   private hintGroups = new Map<string, HintGroup>();
   private collapseTimers = new Map<string, number>();
+  private viewWidth: number;
+  private viewHeight: number;
 
   constructor(config: WorldMapRendererConfig) {
     this.app = config.app;
+    this.root = config.parentContainer ?? this.app.stage;
+    this.viewWidth = this.app.screen.width;
+    this.viewHeight = this.app.screen.height;
 
     this.worldContainer = new Container();
     this.mapContainer = new Container();
@@ -67,9 +73,8 @@ export class WorldMapRenderer {
     this.worldContainer.addChild(this.mapContainer);
     this.worldContainer.addChild(this.hintsContainer);
 
-    const parent = config.parentContainer ?? this.app.stage;
-    parent.addChild(this.worldContainer);
-    parent.addChild(this.uiContainer);
+    this.root.addChild(this.worldContainer);
+    this.root.addChild(this.uiContainer);
 
     this.tooltip = new Container();
     this.tooltip.visible = false;
@@ -89,15 +94,14 @@ export class WorldMapRenderer {
     this.tooltipText.y = 6;
     this.tooltip.addChild(this.tooltipText);
 
-    this.app.stage.addChild(this.tooltip);
+    this.root.addChild(this.tooltip);
 
     this.setupControls();
   }
 
   private setupControls(): void {
     this.worldContainer.eventMode = 'static';
-    this.app.stage.eventMode = 'static';
-    this.app.stage.hitArea = this.app.screen;
+    this.root.eventMode = 'static';
 
     this.setupZoomControl();
     this.setupDragControl();
@@ -135,13 +139,31 @@ export class WorldMapRenderer {
       this.worldContainer.scale.set(newScale);
       this.worldContainer.x = e.clientX - worldPos.x * newScale;
       this.worldContainer.y = e.clientY - worldPos.y * newScale;
+      this.clampPosition();
     };
 
     this.app.canvas?.addEventListener('wheel', this.wheelHandler, { passive: false });
   }
 
+  private clampPosition(): void {
+    if (!this.manifest) return;
+    const mapSize = this.manifest.grid_size * this.manifest.tile_size;
+    const scale = this.currentZoom / 100;
+    const scaledW = mapSize * scale;
+    const scaledH = mapSize * scale;
+
+    // Don't let the map leave the viewport entirely — keep at least half visible
+    const minX = this.viewWidth - scaledW;
+    const minY = this.viewHeight - scaledH;
+    const maxX = 0;
+    const maxY = 0;
+
+    this.worldContainer.x = Math.max(minX, Math.min(maxX, this.worldContainer.x));
+    this.worldContainer.y = Math.max(minY, Math.min(maxY, this.worldContainer.y));
+  }
+
   private setupDragControl(): void {
-    this.app.stage.on('pointerdown', (e) => {
+    this.root.on('pointerdown', (e) => {
       this.isDragging = true;
       this.dragStart.x = e.global.x - this.worldContainer.x;
       this.dragStart.y = e.global.y - this.worldContainer.y;
@@ -151,25 +173,22 @@ export class WorldMapRenderer {
       }
     });
 
-    this.app.stage.on('pointermove', (e) => {
-      if (!this.isDragging) {
-        return;
-      }
-
+    this.root.on('pointermove', (e) => {
+      if (!this.isDragging) return;
       this.worldContainer.x = e.global.x - this.dragStart.x;
       this.worldContainer.y = e.global.y - this.dragStart.y;
+      this.clampPosition();
     });
 
     const stopDrag = () => {
       this.isDragging = false;
-
       if (this.app.canvas) {
         this.app.canvas.style.cursor = 'default';
       }
     };
 
-    this.app.stage.on('pointerup', stopDrag);
-    this.app.stage.on('pointerupoutside', stopDrag);
+    this.root.on('pointerup', stopDrag);
+    this.root.on('pointerupoutside', stopDrag);
   }
 
   async loadWorldMap(superarea: number = 0): Promise<void> {
@@ -230,17 +249,26 @@ export class WorldMapRenderer {
     await Promise.all(tilePromises);
   }
 
+  setViewSize(w: number, h: number): void {
+    this.viewWidth = w;
+    this.viewHeight = h;
+  }
+
   private centerMap(): void {
     if (!this.manifest) {
       return;
     }
 
     const mapSize = this.manifest.grid_size * this.manifest.tile_size;
-    const scale = this.currentZoom / 100;
 
+    // Auto-fit: calculate zoom so the map fills the available height
+    const fitZoom = (this.viewHeight / mapSize) * 100;
+    this.currentZoom = Math.max(WORLDMAP_CONSTANTS.MIN_ZOOM, Math.min(fitZoom, WORLDMAP_CONSTANTS.MAX_ZOOM));
+
+    const scale = this.currentZoom / 100;
     this.worldContainer.scale.set(scale);
-    this.worldContainer.x = (this.app.screen.width - mapSize * scale) / 2;
-    this.worldContainer.y = (this.app.screen.height - mapSize * scale) / 2;
+    this.worldContainer.x = (this.viewWidth - mapSize * scale) / 2;
+    this.worldContainer.y = (this.viewHeight - mapSize * scale) / 2;
   }
 
   private async renderHints(): Promise<void> {
@@ -704,11 +732,11 @@ export class WorldMapRenderer {
     let tooltipX = x + offset;
     let tooltipY = y + offset;
 
-    if (tooltipX + this.tooltip.width > this.app.screen.width) {
+    if (tooltipX + this.tooltip.width > this.viewWidth) {
       tooltipX = x - this.tooltip.width - offset;
     }
 
-    if (tooltipY + this.tooltip.height > this.app.screen.height) {
+    if (tooltipY + this.tooltip.height > this.viewHeight) {
       tooltipY = y - this.tooltip.height - offset;
     }
 

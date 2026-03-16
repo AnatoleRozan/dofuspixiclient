@@ -15,6 +15,7 @@ import { DISPLAY_HEIGHT } from "@/constants/battlefield";
 import { type GameWorld, getGameWorld } from "@/ecs/world";
 import { Banner } from "@/hud/banner";
 import { StatsPanel } from "@/hud/stats";
+import { WorldMapPanel } from "@/hud/worldmap";
 import { initTooltipBounds } from "@/hud/core/tooltip";
 import { AtlasLoader } from "@/render/atlas-loader";
 import { Engine } from "@/render/engine";
@@ -88,6 +89,7 @@ export class Battlefield {
   private pickingSystem: PickingSystem | null = null;
   private banner: Banner | null = null;
   private statsPanel: StatsPanel | null = null;
+  private worldMapPanel: WorldMapPanel | null = null;
 
   private currentMapData: MapData | null = null;
   private cellDataMap: Map<number, CellData> = new Map();
@@ -272,6 +274,16 @@ export class Battlefield {
     this.banner.setOnStatsToggle(() => {
       this.statsPanel?.toggle();
     });
+    this.banner.setOnMapToggle(() => {
+      this.worldMapPanel?.toggle();
+    });
+    // World map panel — covers the game render area (below banner z-order)
+    this.worldMapPanel = new WorldMapPanel(this.app);
+    const gameAreaH = Math.floor(DISPLAY_HEIGHT * baseZoom);
+    this.worldMapPanel.setArea(this.app.screen.width, gameAreaH);
+    this.app.stage.addChild(this.worldMapPanel.container);
+
+    // Banner — always on top of world map
     this.app.stage.addChild(this.banner.getGraphics());
 
     // Stats panel — anchored above the banner, right side
@@ -773,9 +785,14 @@ export class Battlefield {
   }
 
   private updateStatsPanelPosition(): void {
-    if (!this.statsPanel || !this.app) return;
+    if (!this.app) return;
     const zoom = this.engine.getBaseZoom();
     const bannerY = Math.floor(DISPLAY_HEIGHT * zoom);
+
+    // Update world map panel area
+    this.worldMapPanel?.setArea(this.app.screen.width, bannerY);
+
+    if (!this.statsPanel) return;
     // Panel sticks to the top of the banner, right-aligned
     const panelH = 420; // must match stats-panel.ts H
     const panelW = 250; // must match stats-panel.ts W
@@ -803,6 +820,10 @@ export class Battlefield {
 
   getStatsPanel(): StatsPanel | null {
     return this.statsPanel;
+  }
+
+  getWorldMapPanel(): WorldMapPanel | null {
+    return this.worldMapPanel;
   }
 
   private isZaap(pickableId: number): boolean {
@@ -914,6 +935,8 @@ export class Battlefield {
 
     this.statsPanel?.destroy();
     this.statsPanel = null;
+    this.worldMapPanel?.destroy();
+    this.worldMapPanel = null;
     this.interactionHandler?.destroy();
     this.pickingSystem?.destroy();
     this.atlasLoader?.clearCache();
