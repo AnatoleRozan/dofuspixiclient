@@ -7,13 +7,17 @@ export type KeyAction =
   | 'toggleStats'
   | 'toggleDebug'
   | 'toggleGrid'
-  | 'toggleStressTest';
+  | 'toggleStressTest'
+  | 'toggleWorldMap'
+  | 'escape';
 
 const defaultBindings: Record<KeyAction, string> = {
   toggleStats: 'c',
   toggleDebug: 'd',
   toggleGrid: 'g',
   toggleStressTest: 't',
+  toggleWorldMap: 'm',
+  escape: 'escape',
 };
 
 type ActionHandler = () => void;

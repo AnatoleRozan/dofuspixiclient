@@ -129,6 +129,20 @@
         stressTestActive = battlefield.toggleStressTest();
       }
     });
+    keybindings.on('toggleWorldMap', () => {
+      if (battlefield) {
+        battlefield.getWorldMapPanel()?.toggle();
+      }
+    });
+    keybindings.on('escape', () => {
+      if (!battlefield) return;
+      // Close the topmost open panel
+      if (battlefield.getWorldMapPanel()?.isVisible()) {
+        battlefield.getWorldMapPanel()?.hide();
+      } else if (battlefield.getStatsPanel()?.isVisible()) {
+        battlefield.getStatsPanel()?.hide();
+      }
+    });
     keybindings.attach();
   }
 
