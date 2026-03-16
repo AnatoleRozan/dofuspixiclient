@@ -40,6 +40,7 @@ import { GridOverlay } from "./grid-overlay";
 import { InteractionHandler } from "./interaction-handler";
 import { MapHandler } from "./map-handler";
 import { type SpellAnimationConfig, SpellRenderer } from "./spell-renderer";
+import { StressTest } from "./stress-test";
 
 extensions.add(LayoutSystem);
 TextureSource.defaultOptions.scaleMode = "linear";
@@ -109,6 +110,7 @@ export class Battlefield {
   // Debug overlay
   private debugOverlay: DebugOverlay | null = null;
   private gridOverlay: GridOverlay | null = null;
+  private stressTest: StressTest | null = null;
 
   // Transition snapshot: keeps old map visible while new one loads
   private transitionSnapshot: PixiSprite | null = null;
@@ -833,6 +835,9 @@ export class Battlefield {
       this.ecsTickerCallback = null;
     }
 
+    this.stressTest?.stop();
+    this.stressTest = null;
+
     this.exitCombatMode();
 
     // Clean up world actors
@@ -877,6 +882,29 @@ export class Battlefield {
    */
   toggleGridOverlay(): boolean {
     return this.gridOverlay?.toggle() ?? false;
+  }
+
+  /**
+   * Toggle the 1000-actor stress test.
+   * Press 'T' key to toggle.
+   */
+  toggleStressTest(): boolean {
+    if (this.stressTest) {
+      this.stressTest.stop();
+      this.stressTest = null;
+      return false;
+    }
+
+    if (!this.worldActorRenderer || !this.currentMapData) return false;
+
+    this.stressTest = new StressTest(
+      this.worldActorRenderer,
+      this.currentMapData.width,
+      this.currentMapData.height,
+      this.currentMapData.cells
+    );
+    this.stressTest.start();
+    return true;
   }
 
   // ============================================================================

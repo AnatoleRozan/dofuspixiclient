@@ -11,6 +11,7 @@
   let isResizing = false;
   let error: string | null = null;
   let debugEnabled = false;
+  let stressTestActive = false;
 
   // Connection state
   let connected = false;
@@ -122,6 +123,12 @@
         console.log(`Grid overlay: ${gridEnabled ? "enabled" : "disabled"}`);
       }
     }
+    if (e.key === "t" || e.key === "T") {
+      if (battlefield) {
+        stressTestActive = battlefield.toggleStressTest();
+        console.log(`Stress test: ${stressTestActive ? "started" : "stopped"}`);
+      }
+    }
   }
 
   function handleWheel(e: WheelEvent) {
@@ -169,6 +176,12 @@
   {#if debugEnabled}
     <div class="debug-indicator">
       DEBUG MODE (Press D to toggle) - Hover tiles for info
+    </div>
+  {/if}
+
+  {#if stressTestActive}
+    <div class="stress-indicator">
+      STRESS TEST - 1000 actors (Press T to stop)
     </div>
   {/if}
 
@@ -283,5 +296,20 @@
     background: rgba(100, 0, 0, 0.8);
     color: #f66;
     border: 1px solid #f66;
+  }
+
+  .stress-indicator {
+    position: absolute;
+    top: 10px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(100, 50, 0, 0.9);
+    color: #ffa500;
+    padding: 8px 16px;
+    border-radius: 4px;
+    font-family: monospace;
+    font-size: 12px;
+    z-index: 1001;
+    border: 1px solid #ffa500;
   }
 </style>
