@@ -54,6 +54,10 @@ export class WorldMapRenderer {
   private dragStart = { x: 0, y: 0 };
   private wheelHandler: ((e: WheelEvent) => void) | null = null;
 
+  private gridContainer: Container;
+  private gridGraphics: Graphics;
+  private showGrid = true;
+
   private hintGroups = new Map<string, HintGroup>();
   private collapseTimers = new Map<string, number>();
   private viewWidth: number;
@@ -67,10 +71,14 @@ export class WorldMapRenderer {
 
     this.worldContainer = new Container();
     this.mapContainer = new Container();
+    this.gridContainer = new Container();
+    this.gridGraphics = new Graphics();
+    this.gridContainer.addChild(this.gridGraphics);
     this.hintsContainer = new Container();
     this.uiContainer = new Container();
 
     this.worldContainer.addChild(this.mapContainer);
+    this.worldContainer.addChild(this.gridContainer);
     this.worldContainer.addChild(this.hintsContainer);
 
     this.root.addChild(this.worldContainer);
@@ -202,6 +210,7 @@ export class WorldMapRenderer {
     this.mapCoordinates = data.mapCoordinates;
 
     await this.renderMap();
+    this.drawGrid();
     await this.renderHints();
     this.createCategoryUI();
   }
@@ -269,6 +278,56 @@ export class WorldMapRenderer {
     this.worldContainer.scale.set(scale);
     this.worldContainer.x = (this.viewWidth - mapSize * scale) / 2;
     this.worldContainer.y = (this.viewHeight - mapSize * scale) / 2;
+  }
+
+  private drawGrid(): void {
+    if (!this.manifest) return;
+
+    this.gridGraphics.clear();
+    if (!this.showGrid) return;
+
+    const { bounds, grid_size, tile_size } = this.manifest;
+
+    // Total map in pixels (tile space)
+    const mapPx = grid_size * tile_size;
+
+    // Number of chunks
+    const chunksX = bounds.xMax - bounds.xMin;
+    const chunksY = bounds.yMax - bounds.yMin;
+
+    // Pixels per chunk in tile space
+    const chunkPxW = mapPx / chunksX;
+    const chunkPxH = mapPx / chunksY;
+
+    // Pixels per game-map cell
+    const cellW = chunkPxW / WORLDMAP_CONSTANTS.CHUNK_SIZE;
+    const cellH = chunkPxH / WORLDMAP_CONSTANTS.CHUNK_SIZE;
+
+    const totalCellsX = chunksX * WORLDMAP_CONSTANTS.CHUNK_SIZE;
+    const totalCellsY = chunksY * WORLDMAP_CONSTANTS.CHUNK_SIZE;
+
+    const gridColor = 0x000000;
+    const gridAlpha = 0.12;
+
+    // Vertical lines
+    for (let i = 0; i <= totalCellsX; i++) {
+      const x = i * cellW;
+      this.gridGraphics.rect(x, 0, 1, mapPx);
+      this.gridGraphics.fill({ color: gridColor, alpha: gridAlpha });
+    }
+
+    // Horizontal lines
+    for (let j = 0; j <= totalCellsY; j++) {
+      const y = j * cellH;
+      this.gridGraphics.rect(0, y, mapPx, 1);
+      this.gridGraphics.fill({ color: gridColor, alpha: gridAlpha });
+    }
+  }
+
+  toggleGrid(): boolean {
+    this.showGrid = !this.showGrid;
+    this.drawGrid();
+    return this.showGrid;
   }
 
   private async renderHints(): Promise<void> {
@@ -708,6 +767,36 @@ export class WorldMapRenderer {
       colorIndicator.fill({ color: HINT_COLORS[category.color] ?? 0xffffff });
       this.uiContainer.addChild(colorIndicator);
     });
+
+    // Grid toggle — below categories
+    const gridYPos = 50 + this.hintsData.categories.length * 30 + 10;
+
+    const gridCheckbox = new Graphics();
+    gridCheckbox.rect(20, gridYPos, 20, 20);
+    gridCheckbox.fill({ color: this.showGrid ? 0x44ff44 : 0x444444 });
+    gridCheckbox.stroke({ color: 0xffffff, width: 1 });
+    gridCheckbox.interactive = true;
+    gridCheckbox.cursor = 'pointer';
+    gridCheckbox.on('pointerdown', () => {
+      this.toggleGrid();
+      this.createCategoryUI();
+    });
+    this.uiContainer.addChild(gridCheckbox);
+
+    const gridLabel = new Text({
+      text: 'Grille',
+      style: categoryStyle,
+    });
+    gridLabel.x = 50;
+    gridLabel.y = gridYPos + 2;
+    this.uiContainer.addChild(gridLabel);
+
+    // Resize panel bg to fit
+    const totalH = gridYPos + 30 + 10;
+    panelBg.clear();
+    panelBg.rect(10, 10, 250, totalH - 10);
+    panelBg.fill({ color: 0x000000, alpha: 0.7 });
+    panelBg.stroke({ color: 0x666666, width: 2 });
   }
 
   private showTooltip(text: string, x: number, y: number): void {
