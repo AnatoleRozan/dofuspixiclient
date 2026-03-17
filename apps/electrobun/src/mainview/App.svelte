@@ -1,31 +1,21 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import MapRenderer from '@/components/MapRenderer.svelte';
-  import WorldMap from '@/components/WorldMap.svelte';
 
   let windowHeight = 0;
   let windowWidth = 0;
-  let showWorldMap = false;
 
   function handleResize() {
     windowWidth = window.innerWidth;
     windowHeight = window.innerHeight;
   }
 
-  function handleKeyDown(e: KeyboardEvent) {
-    if (e.key === 'm' || e.key === 'M') {
-      showWorldMap = !showWorldMap;
-    }
-  }
-
   onMount(() => {
     handleResize();
     window.addEventListener('resize', handleResize);
-    window.addEventListener('keydown', handleKeyDown);
 
     return () => {
       window.removeEventListener('resize', handleResize);
-      window.removeEventListener('keydown', handleKeyDown);
     };
   });
 </script>
@@ -34,8 +24,6 @@
   <div class="content">
     <MapRenderer />
   </div>
-
-  <WorldMap visible={showWorldMap} />
 </main>
 
 <style>
