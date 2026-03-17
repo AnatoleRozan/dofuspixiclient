@@ -54,6 +54,10 @@ export class WorldMapRenderer {
   private dragStart = { x: 0, y: 0 };
   private wheelHandler: ((e: WheelEvent) => void) | null = null;
 
+  private gridContainer: Container;
+  private gridGraphics: Graphics;
+  private showGrid = true;
+
   private hintGroups = new Map<string, HintGroup>();
   private collapseTimers = new Map<string, number>();
   private viewWidth: number;
@@ -67,10 +71,14 @@ export class WorldMapRenderer {
 
     this.worldContainer = new Container();
     this.mapContainer = new Container();
+    this.gridContainer = new Container();
+    this.gridGraphics = new Graphics();
+    this.gridContainer.addChild(this.gridGraphics);
     this.hintsContainer = new Container();
     this.uiContainer = new Container();
 
     this.worldContainer.addChild(this.mapContainer);
+    this.worldContainer.addChild(this.gridContainer);
     this.worldContainer.addChild(this.hintsContainer);
 
     this.root.addChild(this.worldContainer);
@@ -202,6 +210,7 @@ export class WorldMapRenderer {
     this.mapCoordinates = data.mapCoordinates;
 
     await this.renderMap();
+    this.drawGrid();
     await this.renderHints();
     this.createCategoryUI();
   }
@@ -269,6 +278,49 @@ export class WorldMapRenderer {
     this.worldContainer.scale.set(scale);
     this.worldContainer.x = (this.viewWidth - mapSize * scale) / 2;
     this.worldContainer.y = (this.viewHeight - mapSize * scale) / 2;
+  }
+
+  private drawGrid(): void {
+    if (!this.manifest) return;
+
+    this.gridGraphics.clear();
+    if (!this.showGrid) return;
+
+    const { DISPLAY_WIDTH, DISPLAY_HEIGHT, CHUNK_SIZE } = WORLDMAP_CONSTANTS;
+    const { bounds } = this.manifest;
+
+    // Cell size in world map pixels (one game map = one cell)
+    const cellW = DISPLAY_WIDTH / CHUNK_SIZE;
+    const cellH = DISPLAY_HEIGHT / CHUNK_SIZE;
+
+    // Number of game-map cells across the world map
+    const xCells = (bounds.xMax - bounds.xMin) * CHUNK_SIZE;
+    const yCells = (bounds.yMax - bounds.yMin) * CHUNK_SIZE;
+    const totalW = xCells * cellW;
+    const totalH = yCells * cellH;
+
+    const gridColor = 0x000000;
+    const gridAlpha = 0.15;
+
+    // Vertical lines
+    for (let i = 0; i <= xCells; i++) {
+      const x = i * cellW;
+      this.gridGraphics.rect(x, 0, 1, totalH);
+      this.gridGraphics.fill({ color: gridColor, alpha: gridAlpha });
+    }
+
+    // Horizontal lines
+    for (let j = 0; j <= yCells; j++) {
+      const y = j * cellH;
+      this.gridGraphics.rect(0, y, totalW, 1);
+      this.gridGraphics.fill({ color: gridColor, alpha: gridAlpha });
+    }
+  }
+
+  toggleGrid(): boolean {
+    this.showGrid = !this.showGrid;
+    this.drawGrid();
+    return this.showGrid;
   }
 
   private async renderHints(): Promise<void> {
