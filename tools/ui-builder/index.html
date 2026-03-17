@@ -73,7 +73,7 @@
       transition: background 0.15s;
     }
     .tool-btn:hover { background: #3c3c3c; border-color: #555; }
-    .tool-btn .icon { font-size: 16px; display: block; margin-bottom: 2px; }
+    .tool-btn .icon { display: block; margin: 0 auto 3px; }
 
     /* Node tree */
     #node-tree {
@@ -254,26 +254,32 @@
         <div><label>Name</label><input id="panel-name" type="text" value="" placeholder="nom" style="width:120px"></div>
       </div>
       <div class="row">
-        <div><label>W</label><input id="panel-w" type="number" value="" placeholder="W"></div>
-        <div><label>H</label><input id="panel-h" type="number" value="" placeholder="H"></div>
+        <div><label>L</label><input id="panel-l" type="number" value="" placeholder="l" style="width:50px"></div>
+        <div><label>T</label><input id="panel-t" type="number" value="" placeholder="t" style="width:50px"></div>
+        <div><label>R</label><input id="panel-r" type="number" value="" placeholder="r" style="width:50px"></div>
+        <div><label>B</label><input id="panel-b" type="number" value="" placeholder="b" style="width:50px"></div>
+      </div>
+      <div class="row">
+        <div><label>Title</label><input id="panel-title" type="text" value="" placeholder="Header title" style="width:120px"></div>
       </div>
       <div class="row">
         <div><label>BG</label><input id="panel-bg" type="color" value="#ddd7b2" style="width:36px;height:22px"></div>
         <div><label>Border</label><input id="panel-border" type="color" value="#8a7f5f" style="width:36px;height:22px"></div>
+        <div><label>Header</label><input id="panel-header-bg" type="color" value="#5c5040" style="width:36px;height:22px"></div>
       </div>
     </div>
 
     <div class="section-title">Add Node</div>
     <div id="toolbox">
-      <button class="tool-btn" data-type="rect"><span class="icon">▢</span>Rect</button>
-      <button class="tool-btn" data-type="text"><span class="icon">T</span>Text</button>
-      <button class="tool-btn" data-type="slot"><span class="icon">◫</span>Slot</button>
-      <button class="tool-btn" data-type="sprite"><span class="icon">🖼</span>Sprite</button>
-      <button class="tool-btn" data-type="bar"><span class="icon">▬</span>Bar</button>
-      <button class="tool-btn" data-type="divider"><span class="icon">─</span>Divider</button>
-      <button class="tool-btn" data-type="scroll-list"><span class="icon">☰</span>Scroll List</button>
-      <button class="tool-btn" data-type="repeat-column"><span class="icon">⋮</span>Repeat Col</button>
-      <button class="tool-btn" data-type="group"><span class="icon">⊞</span>Group</button>
+      <button class="tool-btn" data-type="rect"><svg class="icon" width="14" height="14" viewBox="0 0 14 14" fill="none"><rect x="1.5" y="1.5" width="11" height="11" rx="1.5" stroke="currentColor" stroke-width="1.2"/></svg>Rect</button>
+      <button class="tool-btn" data-type="text"><svg class="icon" width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M3 3h8M7 3v9M5 12h4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>Text</button>
+      <button class="tool-btn" data-type="slot"><svg class="icon" width="14" height="14" viewBox="0 0 14 14" fill="none"><rect x="1.5" y="1.5" width="11" height="11" rx="1" stroke="currentColor" stroke-width="1.2"/><rect x="4" y="4" width="6" height="6" rx=".5" stroke="currentColor" stroke-width=".8" opacity=".4"/></svg>Slot</button>
+      <button class="tool-btn" data-type="sprite"><svg class="icon" width="14" height="14" viewBox="0 0 14 14" fill="none"><rect x="1" y="1" width="12" height="12" rx="1.5" stroke="currentColor" stroke-width="1.1"/><circle cx="5" cy="5" r="1.5" stroke="currentColor" stroke-width=".9"/><path d="M1 10l3-3 2 2 3-4 4 5" stroke="currentColor" stroke-width=".9" stroke-linejoin="round"/></svg>Sprite</button>
+      <button class="tool-btn" data-type="bar"><svg class="icon" width="14" height="14" viewBox="0 0 14 14" fill="none"><rect x="1" y="5" width="12" height="4" rx="2" stroke="currentColor" stroke-width="1.1"/><rect x="2" y="6" width="6" height="2" rx="1" fill="currentColor" opacity=".4"/></svg>Bar</button>
+      <button class="tool-btn" data-type="divider"><svg class="icon" width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M2 7h10" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>Divider</button>
+      <button class="tool-btn" data-type="scroll-list"><svg class="icon" width="14" height="14" viewBox="0 0 14 14" fill="none"><rect x="1" y="1" width="10" height="12" rx="1" stroke="currentColor" stroke-width="1.1"/><path d="M3 4h5M3 7h5M3 10h3" stroke="currentColor" stroke-width=".9" stroke-linecap="round" opacity=".5"/><rect x="12" y="2" width="1.5" height="4" rx=".75" fill="currentColor" opacity=".4"/></svg>List</button>
+      <button class="tool-btn" data-type="repeat-column"><svg class="icon" width="14" height="14" viewBox="0 0 14 14" fill="none"><rect x="3" y="1" width="8" height="3" rx=".8" stroke="currentColor" stroke-width="1"/><rect x="3" y="5.5" width="8" height="3" rx=".8" stroke="currentColor" stroke-width="1"/><rect x="3" y="10" width="8" height="3" rx=".8" stroke="currentColor" stroke-width="1"/></svg>Repeat</button>
+      <button class="tool-btn" data-type="group"><svg class="icon" width="14" height="14" viewBox="0 0 14 14" fill="none"><rect x="1" y="1" width="12" height="12" rx="1.5" stroke="currentColor" stroke-width="1" stroke-dasharray="2 1.5"/><rect x="3" y="3" width="4" height="4" rx=".5" stroke="currentColor" stroke-width=".9" opacity=".5"/><rect x="7" y="7" width="4" height="4" rx=".5" stroke="currentColor" stroke-width=".9" opacity=".5"/></svg>Group</button>
     </div>
 
     <div class="section-title">Node Tree</div>
@@ -282,7 +288,7 @@
 
   <div id="center">
     <div id="toolbar">
-      <button id="btn-home" title="Accueil">⌂</button>
+      <button id="btn-home" title="Accueil"><svg width="14" height="14" viewBox="0 0 14 14" fill="none" style="vertical-align:middle"><path d="M2 7l5-5 5 5M3 6.5V12h3V9h2v3h3V6.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
       <select id="panel-select"></select>
       <button id="btn-new">New Panel</button>
       <div class="sep"></div>

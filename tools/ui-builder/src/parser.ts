@@ -12,6 +12,7 @@
  *   createCloseButton(...)
  */
 import type { PanelDef, PanelNode } from './schema';
+import { createPanelDef } from './schema';
 
 // Known COLORS/METRICS constants
 const KNOWN_COLORS: Record<string, number> = {
@@ -150,11 +151,13 @@ export function parsePanel(source: string): PanelDef {
     return true;
   });
 
-  return {
-    name, w, h, bg, border: 0x8a7f5f, borderWidth: 2, radius,
-    children: unique,
-    viewport: { position: 'center', fillPercent: 75 },
-  };
+  // Use createPanelDef to get the standard structure, then inject parsed nodes into _body
+  const panel = createPanelDef(name, w, h, { bg, radius });
+  const body = panel.children.find(c => c.type === 'group' && (c as { id?: string }).id === '_body');
+  if (body && 'children' in body) {
+    (body as { children: PanelNode[] }).children = unique;
+  }
+  return panel;
 }
 
 // ─── Helpers ───

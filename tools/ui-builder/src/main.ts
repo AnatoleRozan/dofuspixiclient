@@ -1,9 +1,21 @@
-import { Application, Container, Graphics } from 'pixi.js';
+import { Application, Container, Graphics, Text as PixiText } from 'pixi.js';
 import { renderPanel, type RenderResult } from './renderer';
-import type { PanelDef, PanelNode } from './schema';
+import type { PanelDef, PanelNode, Edges, GroupNode } from './schema';
+import { edgesToRect, createPanelDef } from './schema';
 import { generateCode } from './codegen';
 import { History } from './history';
 import { parsePanel } from './parser';
+import { showGridSelector } from './grid-selector';
+
+// ─── SVG Icons ───
+const ICON = {
+  plus: `<svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M7 1v12M1 7h12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>`,
+  code: `<svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M4.5 3L1 7l3.5 4M9.5 3L13 7l-3.5 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+  file: `<svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M3 1h4l3 3v7H3V1z" stroke="currentColor" stroke-width="1.2"/><path d="M7 1v3h3" stroke="currentColor" stroke-width="1.2"/></svg>`,
+  disk: `<svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 1h6l2 2v7a1 1 0 01-1 1H3a1 1 0 01-1-1V1z" stroke="currentColor" stroke-width="1.1"/><rect x="4" y="1" width="4" height="3" rx=".5" stroke="currentColor" stroke-width="1"/><rect x="3" y="7" width="6" height="3" rx=".5" stroke="currentColor" stroke-width="1"/></svg>`,
+  trash: `<svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 3h8M4 3V2h4v1M3 3v7h6V3" stroke="currentColor" stroke-width="1.1"/></svg>`,
+  layout: `<svg width="28" height="28" viewBox="0 0 28 28" fill="none"><rect x="2" y="2" width="24" height="24" rx="3" stroke="currentColor" stroke-width="1.5"/><path d="M2 8h24M10 8v18" stroke="currentColor" stroke-width="1.2"/><rect x="13" y="11" width="10" height="5" rx="1" stroke="currentColor" stroke-width="1" opacity=".5"/><rect x="13" y="19" width="6" height="4" rx="1" stroke="currentColor" stroke-width="1" opacity=".5"/><rect x="4" y="11" width="4" height="4" rx="1" stroke="currentColor" stroke-width="1" opacity=".5"/></svg>`,
+};
 
 // ─── Known project panel files (relative to electrobun/src/lib/) ───
 const PROJECT_PANELS: Array<{ name: string; path: string; desc: string }> = [
@@ -21,8 +33,8 @@ const STORAGE_KEY = 'dofus-ui-builder';
 // Load saved panels from localStorage, or use builtins
 const panels: Record<string, PanelDef> = loadFromStorage() ?? buildDefaultPanels();
 let currentName = '';
-let selectedIndex = -1;
-let selectedIndices: Set<number> = new Set();
+let selectedNode: PanelNode | null = null;
+let selectedNodes: Set<PanelNode> = new Set();
 let app: Application | null = null;
 let result: RenderResult | null = null;
 let viewZoom = 1;
@@ -77,8 +89,8 @@ function pushHistory(): void {
 function applyUndo(def: PanelDef | null): void {
   if (!def) return;
   panels[currentName] = def;
-  selectedIndex = -1;
-  selectedIndices.clear();
+  clearSelection();
+  
   syncPanelInputs();
   rebuild();
 }
@@ -91,16 +103,64 @@ const codeArea = document.getElementById('code-area') as HTMLTextAreaElement;
 const nodeTree = document.getElementById('node-tree')!;
 const panelSelect = document.getElementById('panel-select') as HTMLSelectElement;
 const panelNameInput = document.getElementById('panel-name') as HTMLInputElement;
-const panelWInput = document.getElementById('panel-w') as HTMLInputElement;
-const panelHInput = document.getElementById('panel-h') as HTMLInputElement;
+const panelLInput = document.getElementById('panel-l') as HTMLInputElement;
+const panelTInput = document.getElementById('panel-t') as HTMLInputElement;
+const panelRInput = document.getElementById('panel-r') as HTMLInputElement;
+const panelBInput = document.getElementById('panel-b') as HTMLInputElement;
 const panelBgInput = document.getElementById('panel-bg') as HTMLInputElement;
 const panelBorderInput = document.getElementById('panel-border') as HTMLInputElement;
 const zoomLabel = document.getElementById('zoom-label')!;
 
-function getDef(): PanelDef {
-  return panels[currentName] ?? { name: '', w: 0, h: 0, children: [] };
+function getDef(): PanelDef & { edges: Edges } {
+  const d = panels[currentName] ?? { name: '', w: 0, h: 0, children: [] };
+  if (!d.edges) d.edges = { l: 0, t: 0, r: d.w || 400, b: d.h || 300 };
+  // Always sync w/h from edges (edges are the source of truth)
+  d.w = d.edges.r - d.edges.l;
+  d.h = d.edges.b - d.edges.t;
+  return d as PanelDef & { edges: Edges };
 }
+
+/** Get edges for a node — creates from x/y/w/h if missing */
+function getNodeEdges(node: PanelNode): Edges {
+  if ('edges' in node && node.edges) return node.edges;
+  const n = node as unknown as Record<string, unknown>;
+  const x = (n.x as number) ?? 0;
+  const y = (n.y as number) ?? 0;
+  const w = (n.w as number) ?? (n.size as number) ?? 32;
+  const h = (n.h as number) ?? (n.size as number) ?? 32;
+  return { l: x, t: y, r: x + w, b: y + h };
+}
+
+/** Set edges on a node — also syncs x/y/w/h for backward compat */
+function setNodeEdges(node: PanelNode, edges: Edges): void {
+  (node as unknown as Record<string, unknown>).edges = edges;
+  const rect = edgesToRect(edges);
+  const n = node as unknown as Record<string, unknown>;
+  if ('x' in n) n.x = rect.x;
+  if ('y' in n) n.y = rect.y;
+  if ('w' in n) n.w = rect.w;
+  if ('h' in n) n.h = rect.h;
+  if ('size' in n && !('w' in n)) n.size = Math.max(rect.w, rect.h);
+}
+
 function snap(v: number): number { return snapEnabled ? Math.round(v / snapSize) * snapSize : v; }
+
+/** Find the _body group — where user nodes are added */
+function getBodyGroup(def: PanelDef): GroupNode | null {
+  return def.children.find(c => c.type === 'group' && c.id === '_body') as GroupNode ?? null;
+}
+
+/** Find the _header group */
+function getHeaderGroup(def: PanelDef): GroupNode | null {
+  return def.children.find(c => c.type === 'group' && c.id === '_header') as GroupNode ?? null;
+}
+
+/** Get the title text node inside the header */
+function getHeaderTitle(def: PanelDef): PanelNode | null {
+  const header = getHeaderGroup(def);
+  if (!header) return null;
+  return header.children.find(c => c.type === 'text') ?? null;
+}
 
 // ─── Tabs (JSON / Code) ───
 const tabJson = document.getElementById('tab-json')!;
@@ -147,26 +207,63 @@ document.getElementById('btn-home')!.addEventListener('click', () => {
   showWelcome();
 });
 
-document.getElementById('btn-new')!.addEventListener('click', () => {
+document.getElementById('btn-new')!.addEventListener('click', async () => {
+  const result = await showGridSelector();
+  if (!result) return;
   const name = prompt('Nom du panel:', `panel_${Object.keys(panels).length}`) || `panel_${Date.now()}`;
-  panels[name] = {
-    name, w: 400, h: 300,
-    bg: 0xddd7b2, border: 0x8a7f5f, borderWidth: 2, radius: 3,
-    children: [],
-    viewport: { position: 'center', fillPercent: 75 },
-  };
+  const def = createPanelDef(name, result.w, result.h);
+  def.edges = result.edges;
+  panels[name] = def;
   openPanel(name);
 });
 
 // ─── Panel properties ───
+const panelTitleInput = document.getElementById('panel-title') as HTMLInputElement;
+const panelHeaderBgInput = document.getElementById('panel-header-bg') as HTMLInputElement;
+
 function syncPanelInputs() {
   const def = getDef();
   panelNameInput.value = def.name;
-  panelWInput.value = String(def.w);
-  panelHInput.value = String(def.h);
-  panelBgInput.value = '#' + (def.bg ?? 0xddd7b2).toString(16).padStart(6, '0');
-  panelBorderInput.value = '#' + (def.border ?? 0x8a7f5f).toString(16).padStart(6, '0');
+  panelLInput.value = String(def.edges.l);
+  panelTInput.value = String(def.edges.t);
+  panelRInput.value = String(def.edges.r);
+  panelBInput.value = String(def.edges.b);
+  // Get bg color from first rect child (the _bg node)
+  const bgNode = def.children.find(c => c.type === 'rect' && 'fill' in c && c.fillAlpha !== 0);
+  panelBgInput.value = '#' + ((bgNode as { fill?: number })?.fill ?? 0xddd7b2).toString(16).padStart(6, '0');
+  // Get border color from last rect with stroke
+  const borderNode = [...def.children].reverse().find(c => c.type === 'rect' && 'stroke' in c);
+  panelBorderInput.value = '#' + ((borderNode as { stroke?: number })?.stroke ?? 0x8a7f5f).toString(16).padStart(6, '0');
+  // Header title
+  const titleNode = getHeaderTitle(def);
+  panelTitleInput.value = (titleNode as { value?: string })?.value ?? def.name;
+  // Header bg
+  const headerGroup = getHeaderGroup(def);
+  panelHeaderBgInput.value = '#' + (headerGroup?.fill ?? 0x5c5040).toString(16).padStart(6, '0');
 }
+
+panelTitleInput.addEventListener('input', () => {
+  if (!currentName) return;
+  const titleNode = getHeaderTitle(getDef());
+  if (titleNode && 'value' in titleNode) {
+    (titleNode as { value: string }).value = panelTitleInput.value;
+    rebuild();
+  }
+});
+panelHeaderBgInput.addEventListener('input', () => {
+  if (!currentName) return;
+  const header = getHeaderGroup(getDef());
+  if (header) {
+    header.fill = parseInt(panelHeaderBgInput.value.slice(1), 16);
+    // Also update the rect children
+    for (const child of header.children) {
+      if (child.type === 'rect' && 'fill' in child) {
+        (child as { fill: number }).fill = header.fill;
+      }
+    }
+    rebuild();
+  }
+});
 
 panelNameInput.addEventListener('input', () => {
   if (!currentName) return;
@@ -178,27 +275,50 @@ panelNameInput.addEventListener('input', () => {
     refreshPanelSelect();
   }
 });
-panelWInput.addEventListener('input', () => { if (!currentName) return; pushHistory(); getDef().w = parseInt(panelWInput.value) || 400; rebuild(); });
-panelHInput.addEventListener('input', () => { if (!currentName) return; pushHistory(); getDef().h = parseInt(panelHInput.value) || 300; rebuild(); });
-panelBgInput.addEventListener('input', () => { if (!currentName) return; pushHistory(); getDef().bg = parseInt(panelBgInput.value.slice(1), 16); rebuild(); });
-panelBorderInput.addEventListener('input', () => { if (!currentName) return; pushHistory(); getDef().border = parseInt(panelBorderInput.value.slice(1), 16); rebuild(); });
+for (const [inputEl, edgeKey] of [
+  [panelLInput, 'l'], [panelTInput, 't'], [panelRInput, 'r'], [panelBInput, 'b'],
+] as const) {
+  inputEl.addEventListener('input', () => {
+    if (!currentName) return; pushHistory();
+    const def = getDef();
+    def.edges[edgeKey] = parseInt(inputEl.value) || 0;
+    rebuild();
+  });
+}
+panelBgInput.addEventListener('input', () => {
+  if (!currentName) return; pushHistory();
+  const color = parseInt(panelBgInput.value.slice(1), 16);
+  const bgNode = getDef().children.find(c => c.type === 'rect' && 'fill' in c && (c as { fillAlpha?: number }).fillAlpha !== 0);
+  if (bgNode) (bgNode as { fill: number }).fill = color;
+  rebuild();
+});
+panelBorderInput.addEventListener('input', () => {
+  if (!currentName) return; pushHistory();
+  const color = parseInt(panelBorderInput.value.slice(1), 16);
+  const borderNode = [...getDef().children].reverse().find(c => c.type === 'rect' && 'stroke' in c);
+  if (borderNode) (borderNode as { stroke: number }).stroke = color;
+  rebuild();
+});
 
 // ─── Toolbox ───
 document.querySelectorAll<HTMLButtonElement>('.tool-btn').forEach(btn => {
   btn.addEventListener('click', () => {
     pushHistory();
-    getDef().children.push(createDefaultNode(btn.dataset.type!));
-    selectedIndex = getDef().children.length - 1;
+    const body = getBodyGroup(getDef());
+    const target = body ? body.children : getDef().children;
+    const newNode = createDefaultNode(btn.dataset.type!);
+    target.push(newNode);
+    selectSingle(newNode);
     rebuild();
   });
 });
 
 function createDefaultNode(type: string): PanelNode {
   const defs: Record<string, PanelNode> = {
-    rect:           { type: 'rect', x: 20, y: 40, w: 80, h: 40, fill: 0xc4be96, radius: 0 },
+    rect:           { type: 'rect', x: 20, y: 40, w: 80, h: 40, fill: 0xc4be96, fillAlpha: 1, radius: 0 },
     text:           { type: 'text', x: 20, y: 40, value: 'Label', size: 11, bold: true },
     slot:           { type: 'slot', x: 20, y: 40, size: 32, id: `slot_${Date.now() % 10000}` },
-    sprite:         { type: 'sprite', x: 20, y: 40, w: 48, h: 48, src: '' },
+    sprite:         { type: 'sprite', x: 20, y: 40, w: 48, h: 48, src: '', alpha: 1 },
     bar:            { type: 'bar', x: 20, y: 40, w: 100, h: 10, value: 0.5, id: 'bar_new' },
     divider:        { type: 'divider', x: 20, y: 40, w: 100, h: 1 },
     'scroll-list':  { type: 'scroll-list', x: 20, y: 40, w: 200, h: 150, rowHeight: 28, rowCount: 20, id: 'list', rowTemplate: [
@@ -213,21 +333,48 @@ function createDefaultNode(type: string): PanelNode {
 
 // ─── Toolbar ───
 document.getElementById('btn-duplicate')!.addEventListener('click', () => {
-  if (selectedIndex < 0) return;
+  if (!selectedNode) return;
   pushHistory();
-  const clone = structuredClone(getDef().children[selectedIndex]);
+  const clone = structuredClone(selectedNode);
   if ('x' in clone) (clone as { x: number }).x += 16;
   if ('y' in clone) (clone as { y: number }).y += 16;
-  getDef().children.splice(selectedIndex + 1, 0, clone);
-  selectedIndex++;
+  // Find parent and insert after
+  const def = getDef();
+  const idx = def.children.indexOf(selectedNode);
+  if (idx >= 0) {
+    def.children.splice(idx + 1, 0, clone);
+  } else {
+    // Search in body group
+    const body = getBodyGroup(def);
+    if (body) {
+      const bi = body.children.indexOf(selectedNode);
+      if (bi >= 0) body.children.splice(bi + 1, 0, clone);
+      else body.children.push(clone);
+    } else {
+      def.children.push(clone);
+    }
+  }
+  selectSingle(clone);
   rebuild();
 });
 
 document.getElementById('btn-delete')!.addEventListener('click', () => {
-  if (selectedIndex < 0) return;
+  if (!selectedNode) return;
   pushHistory();
-  getDef().children.splice(selectedIndex, 1);
-  selectedIndex = Math.min(selectedIndex, getDef().children.length - 1);
+  const def = getDef();
+  // Remove from top-level or from groups
+  let removed = false;
+  const idx = def.children.indexOf(selectedNode);
+  if (idx >= 0) { def.children.splice(idx, 1); removed = true; }
+  if (!removed) {
+    for (const child of def.children) {
+      if (child.type === 'group' && 'children' in child) {
+        const gi = (child as { children: PanelNode[] }).children.indexOf(selectedNode);
+        if (gi >= 0) { (child as { children: PanelNode[] }).children.splice(gi, 1); break; }
+      }
+    }
+  }
+  clearSelection();
   rebuild();
 });
 
@@ -254,7 +401,7 @@ document.getElementById('btn-import')!.addEventListener('click', () => {
     const def = JSON.parse(jsonArea.value) as PanelDef;
     panels[def.name || 'imported'] = def;
     currentName = def.name || 'imported';
-    selectedIndex = -1;
+    clearSelection();
     refreshPanelSelect(); syncPanelInputs(); rebuild();
   } catch (e) { alert('Invalid JSON: ' + (e as Error).message); }
 });
@@ -285,168 +432,281 @@ window.addEventListener('keydown', (e) => {
   if (mod && e.key === 'd') { e.preventDefault(); document.getElementById('btn-duplicate')!.click(); }
   if (mod && e.key === 'a') { e.preventDefault(); selectAll(); }
   if (e.key === 'Escape') {
-    selectedIndex = -1;
-    selectedIndices.clear();
+    clearSelection();
+    
     rebuild();
   }
 });
 
 function selectAll() {
   const def = getDef();
-  selectedIndices.clear();
-  for (let i = 0; i < def.children.length; i++) {
-    selectedIndices.add(i);
+  selectedNodes.clear();
+  for (const child of def.children) {
+    selectedNodes.add(child);
   }
-  selectedIndex = def.children.length > 0 ? 0 : -1;
+  selectedNode = def.children[0] ?? null;
   rebuild();
 }
 
-function isSelected(i: number): boolean {
-  return selectedIndices.size > 0 ? selectedIndices.has(i) : i === selectedIndex;
+function isNodeSelected(node: PanelNode): boolean {
+  return selectedNodes.size > 0 ? selectedNodes.has(node) : node === selectedNode;
 }
 
-function getSelectedNodes(): Array<{ index: number; node: PanelNode }> {
-  const def = getDef();
-  if (selectedIndices.size > 0) {
-    return [...selectedIndices].map(i => ({ index: i, node: def.children[i] })).filter(e => e.node);
-  }
-  if (selectedIndex >= 0 && selectedIndex < def.children.length) {
-    return [{ index: selectedIndex, node: def.children[selectedIndex] }];
-  }
+function getSelectedNodesList(): PanelNode[] {
+  if (selectedNodes.size > 0) return [...selectedNodes];
+  if (selectedNode) return [selectedNode];
   return [];
 }
 
-/** Bounding box of all selected nodes */
+function clearSelection() {
+  selectedNode = null;
+  selectedNodes.clear();
+}
+
+function selectSingle(node: PanelNode) {
+  selectedNodes.clear();
+  selectedNode = node;
+}
+
+/** Find the parent group offset for a node (recursive) */
+function getParentOffset(target: PanelNode, nodes: PanelNode[], ox = 0, oy = 0): { x: number; y: number } | null {
+  for (const node of nodes) {
+    if (node === target) return { x: ox, y: oy };
+    if (node.type === 'group' && 'children' in node) {
+      const gx = node.edges ? node.edges.l : (node.x ?? 0);
+      const gy = node.edges ? node.edges.t : (node.y ?? 0);
+      const found = getParentOffset(target, node.children, ox + gx, oy + gy);
+      if (found) return found;
+    }
+  }
+  return null;
+}
+
+/** Get edges in panel-root coordinates (accounts for parent group offsets) */
+function getGlobalEdges(node: PanelNode): Edges {
+  const local = getNodeEdges(node);
+  const offset = getParentOffset(node, getDef().children);
+  if (!offset) return local;
+  return {
+    l: local.l + offset.x,
+    t: local.t + offset.y,
+    r: local.r + offset.x,
+    b: local.b + offset.y,
+  };
+}
+
+/** Bounding box of all selected nodes (in panel-root coords) */
 function getSelectionBounds(): { x: number; y: number; w: number; h: number } | null {
-  const nodes = getSelectedNodes();
+  const nodes = getSelectedNodesList();
   if (nodes.length === 0) return null;
 
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-  for (const { node } of nodes) {
-    if (!('x' in node && 'y' in node)) continue;
-    const n = node as { x: number; y: number; w?: number; h?: number; size?: number };
-    const nx = n.x;
-    const ny = n.y;
-    const nw = n.w ?? n.size ?? 32;
-    const nh = n.h ?? n.size ?? 32;
-    minX = Math.min(minX, nx);
-    minY = Math.min(minY, ny);
-    maxX = Math.max(maxX, nx + nw);
-    maxY = Math.max(maxY, ny + nh);
+  for (const node of nodes) {
+    const e = getGlobalEdges(node);
+    minX = Math.min(minX, e.l);
+    minY = Math.min(minY, e.t);
+    maxX = Math.max(maxX, e.r);
+    maxY = Math.max(maxY, e.b);
   }
   if (minX === Infinity) return null;
   return { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
 }
 
 // ─── Node tree ───
-// Icons per type for quick visual identification
 const TYPE_ICONS: Record<string, string> = {
-  rect: '▢', text: 'T', slot: '◫', sprite: '🖼', bar: '▬',
-  divider: '─', group: '⊞', column: '↕', row: '↔',
-  'repeat-column': '⋮', 'scroll-list': '☰',
+  rect: 'R', text: 'T', slot: 'S', sprite: 'I', bar: 'B',
+  divider: '-', group: 'G', column: 'C', row: 'W',
+  'repeat-column': 'x', 'scroll-list': 'L',
 };
+
+// Collapsed state for tree groups
+const collapsedGroups = new Set<PanelNode>();
 
 function renderTree() {
   nodeTree.innerHTML = '';
-  getDef().children.forEach((node, i) => {
-    renderTreeNode(node, i, 0);
-  });
+  const def = getDef();
+  const body = getBodyGroup(def);
+  const bodyNodes = new Set<PanelNode>();
+  if (body) {
+    function collect(nodes: PanelNode[]) {
+      for (const n of nodes) {
+        bodyNodes.add(n);
+        if ('children' in n && Array.isArray((n as {children:PanelNode[]}).children))
+          collect((n as {children:PanelNode[]}).children);
+      }
+    }
+    collect(body.children);
+  }
+
+  // Panel root
+  const rootDiv = document.createElement('div');
+  rootDiv.className = 'tree-node';
+  rootDiv.style.cssText = 'padding:4px 8px;color:#666;font-size:10px;border-bottom:1px solid #333;cursor:default';
+  const w = def.edges?.r ? def.edges.r - def.edges.l : def.w;
+  const h = def.edges?.b ? def.edges.b - def.edges.t : def.h;
+  rootDiv.innerHTML = `<span class="type" style="color:#888">${def.name}</span> <span style="color:#444">${w} x ${h}</span>`;
+  nodeTree.appendChild(rootDiv);
+
+  // Structural nodes (header, bg, border) — shown dimmed, not selectable
+  for (const child of def.children) {
+    if (child === body) continue; // body is shown separately
+    const id = ('id' in child && child.id) ? child.id : child.type;
+    const row = document.createElement('div');
+    row.className = 'tree-node';
+    row.style.cssText = 'padding:3px 8px 3px 20px;font-size:10px;color:#444;cursor:default';
+    const icon = TYPE_ICONS[child.type] ?? '?';
+    row.innerHTML = `<span style="opacity:0.4;margin-right:3px">${icon}</span>${id}`;
+    nodeTree.appendChild(row);
+  }
+
+  // Body content — user nodes (selectable)
+  if (body && body.children.length > 0) {
+    const bodyHeader = document.createElement('div');
+    bodyHeader.style.cssText = 'padding:4px 8px;color:#555;font-size:9px;border-top:1px solid #2a2a2a;border-bottom:1px solid #2a2a2a;text-transform:uppercase;letter-spacing:1px';
+    bodyHeader.textContent = 'Contenu';
+    nodeTree.appendChild(bodyHeader);
+
+    renderTreeChildren(body.children, 1, bodyNodes);
+  }
 }
 
-function renderTreeNode(node: PanelNode, i: number, depth: number) {
+
+function renderTreeChildren(nodes: PanelNode[], depth: number, _bodyNodes?: Set<PanelNode>) {
+  for (const node of nodes) {
+    const id = ('id' in node && node.id) ? node.id : null;
+    const hasChildren = 'children' in node && Array.isArray((node as { children: PanelNode[] }).children);
+    const isCollapsed = collapsedGroups.has(node);
+
+    // Label
+    let label: string = node.type;
+    if (id) label = id;
+    if (node.type === 'text') label = `"${(node as { value: string }).value?.substring(0, 16)}"`;
+
+    const row = makeTreeRow(node, label, node.type, depth, hasChildren ? !isCollapsed : undefined);
+    nodeTree.appendChild(row);
+
+    // Recurse children
+    if (hasChildren && !isCollapsed) {
+      renderTreeChildren((node as { children: PanelNode[] }).children, depth + 1);
+    }
+
+    // Template info
+    if (node.type === 'repeat-column' && !isCollapsed) {
+      const info = makeTreeRow(null, `${node.count} slots`, 'template', depth + 1);
+      info.style.opacity = '0.4';
+      nodeTree.appendChild(info);
+    }
+  }
+}
+
+function makeTreeRow(
+  node: PanelNode | null,
+  label: string,
+  typeStr: string,
+  depth: number,
+  expanded?: boolean, // undefined = not expandable
+): HTMLDivElement {
   const div = document.createElement('div');
-  div.className = 'tree-node' + (isSelected(i) ? ' selected' : '');
-  div.style.paddingLeft = `${8 + depth * 14}px`;
-  div.dataset.index = String(i);
+  div.className = 'tree-node' + (node && isNodeSelected(node) ? ' selected' : '');
+  div.style.paddingLeft = `${6 + depth * 14}px`;
+  div.style.cursor = 'pointer';
 
-  const icon = TYPE_ICONS[node.type] ?? '?';
-  const idStr = ('id' in node && node.id) ? `<span class="id">${node.id}</span>` : '';
-  const valStr = node.type === 'text' ? `<span class="id">"${node.value.substring(0, 12)}"</span>` : '';
-  const sizeStr = ('w' in node && 'h' in node)
-    ? `<span class="id" style="color:#666">${(node as {w:number}).w}×${(node as {h:number}).h}</span>`
-    : ('size' in node ? `<span class="id" style="color:#666">${(node as {size:number}).size}</span>` : '');
+  // Expand/collapse arrow
+  let arrow = '<span style="width:12px;display:inline-block"></span>';
+  if (expanded != null) {
+    arrow = `<span style="width:12px;display:inline-block;color:#555;font-size:9px">${expanded ? '▼' : '▶'}</span>`;
+  }
 
-  const label = document.createElement('span');
-  label.innerHTML = `<span style="opacity:0.5;margin-right:3px">${icon}</span><span class="type">${node.type}</span> ${idStr} ${valStr} ${sizeStr}`;
-  div.appendChild(label);
+  const typeIcon = TYPE_ICONS[typeStr] ?? '';
+  const typeBadge = typeIcon
+    ? `<span style="color:#555;background:#2a2a2a;border:1px solid #333;border-radius:2px;padding:0 3px;font-size:8px;margin-right:4px">${typeIcon}</span>`
+    : '';
 
-  const del = document.createElement('button');
-  del.className = 'del-btn'; del.textContent = '×';
-  del.addEventListener('click', (e) => {
-    e.stopPropagation();
-    pushHistory();
-    getDef().children.splice(i, 1);
-    selectedIndices.clear();
-    if (selectedIndex >= getDef().children.length) selectedIndex = getDef().children.length - 1;
-    rebuild();
-  });
-  div.appendChild(del);
+  const labelEl = document.createElement('span');
+  labelEl.innerHTML = `${arrow}${typeBadge}<span class="type">${label}</span>`;
+  div.appendChild(labelEl);
 
-  div.addEventListener('click', (e) => {
-    if (e.shiftKey) {
-      // Shift+click: toggle in multi-select
-      if (selectedIndices.has(i)) selectedIndices.delete(i);
-      else selectedIndices.add(i);
-      selectedIndex = i;
-    } else {
-      selectedIndices.clear();
-      selectedIndex = i;
+  if (node) {
+    // Delete button
+    const del = document.createElement('button');
+    del.className = 'del-btn'; del.textContent = '×';
+    del.addEventListener('click', (e) => {
+      e.stopPropagation();
+      pushHistory();
+      removeNode(node);
+      clearSelection();
+      rebuild();
+    });
+    div.appendChild(del);
+
+    // Click to select
+    div.addEventListener('click', (e) => {
+      e.stopPropagation();
+      // Toggle expand/collapse for groups
+      if (expanded != null && e.offsetX < 6 + depth * 14 + 14) {
+        if (collapsedGroups.has(node)) collapsedGroups.delete(node);
+        else collapsedGroups.add(node);
+        renderTree();
+        return;
+      }
+      if (e.shiftKey) {
+        if (selectedNodes.has(node)) selectedNodes.delete(node);
+        else selectedNodes.add(node);
+        selectedNode = node;
+      } else {
+        selectSingle(node);
+      }
+      rebuild();
+    });
+  }
+
+  return div;
+}
+
+/** Remove a node from anywhere in the tree */
+function removeNode(target: PanelNode) {
+  function removeFrom(nodes: PanelNode[]): boolean {
+    const idx = nodes.indexOf(target);
+    if (idx >= 0) { nodes.splice(idx, 1); return true; }
+    for (const n of nodes) {
+      if ('children' in n && Array.isArray((n as { children: PanelNode[] }).children)) {
+        if (removeFrom((n as { children: PanelNode[] }).children)) return true;
+      }
     }
-    rebuild();
-  });
-
-  nodeTree.appendChild(div);
-
-  // Show children of group/column/row in the tree
-  if ('children' in node && Array.isArray(node.children)) {
-    for (const child of node.children) {
-      // Children aren't direct def.children — show them read-only, dimmed
-      const childDiv = document.createElement('div');
-      childDiv.className = 'tree-node';
-      childDiv.style.paddingLeft = `${8 + (depth + 1) * 14}px`;
-      childDiv.style.opacity = '0.6';
-      const cIcon = TYPE_ICONS[child.type] ?? '?';
-      const cId = ('id' in child && child.id) ? `<span class="id">${child.id}</span>` : '';
-      childDiv.innerHTML = `<span style="opacity:0.5;margin-right:3px">${cIcon}</span><span class="type">${child.type}</span> ${cId}`;
-      nodeTree.appendChild(childDiv);
-    }
+    return false;
   }
-
-  // Show repeat-column template info
-  if (node.type === 'repeat-column') {
-    const tmplDiv = document.createElement('div');
-    tmplDiv.className = 'tree-node';
-    tmplDiv.style.paddingLeft = `${8 + (depth + 1) * 14}px`;
-    tmplDiv.style.opacity = '0.5';
-    tmplDiv.innerHTML = `<span style="margin-right:3px">×</span>${node.count} slots (${node.idPrefix ?? 'unnamed'})`;
-    nodeTree.appendChild(tmplDiv);
-  }
-
-  // Show scroll-list row template info
-  if (node.type === 'scroll-list') {
-    const tmplDiv = document.createElement('div');
-    tmplDiv.className = 'tree-node';
-    tmplDiv.style.paddingLeft = `${8 + (depth + 1) * 14}px`;
-    tmplDiv.style.opacity = '0.5';
-    tmplDiv.innerHTML = `<span style="margin-right:3px">☰</span>${node.rowCount} rows, ${node.rowTemplate.length} items/row`;
-    nodeTree.appendChild(tmplDiv);
-  }
+  removeFrom(getDef().children);
 }
 
 // ─── Props panel ───
 function renderProps() {
   propsEl.innerHTML = '';
-  if (selectedIndex < 0 || selectedIndex >= getDef().children.length) {
+  if (!selectedNode) {
     propsEl.innerHTML = '<p class="hint">Select a node to edit.<br>Drag nodes on canvas to move.</p>';
     return;
   }
 
-  const node = getDef().children[selectedIndex];
+  const node = selectedNode;
   const h3 = document.createElement('h3');
   h3.textContent = node.type;
   propsEl.appendChild(h3);
 
-  const skip = new Set(['type', 'children', 'template', 'rowTemplate', 'interaction']);
+  // ─── Edges (l, t, r, b) ───
+  const edges = getNodeEdges(node);
+  const edgeSection = document.createElement('div');
+  edgeSection.style.cssText = 'display:grid;grid-template-columns:1fr 1fr;gap:2px 8px;margin-bottom:8px';
+  for (const key of ['l', 't', 'r', 'b'] as const) {
+    edgeSection.appendChild(makePropRow(key, edges[key], (v) => {
+      pushHistory();
+      edges[key] = v as number;
+      setNodeEdges(node, edges);
+      rebuild();
+    }));
+  }
+  propsEl.appendChild(edgeSection);
+
+  // ─── Other props ───
+  const skip = new Set(['type', 'children', 'template', 'rowTemplate', 'interaction', 'edges', 'x', 'y', 'w', 'h']);
   for (const [key, value] of Object.entries(node)) {
     if (skip.has(key)) continue;
     propsEl.appendChild(makePropRow(key, value, (v) => {
@@ -675,21 +935,23 @@ let resizeState: {
   active: boolean;
   handlePos: string;
   startGX: number; startGY: number;
-  origX: number; origY: number; origW: number; origH: number;
+  origEdges: Edges;
   zoom: number;
-  hasWH: boolean; hasSize: boolean;
+  isPanel: boolean;
+  origContainerX: number; origContainerY: number;
+  origNodeEdges?: Edges[];
 } | null = null;
-let resizeOriginals: Array<{ x: number; y: number; w: number; h: number }> | null = null;
+
 
 const HANDLE_SIZE = 8;
 const HANDLE_COLOR = 0x00aaff;
 
 function addResizeHandles(panelContainer: Container, zoom: number) {
-  const selected = getSelectedNodes();
+  const selected = getSelectedNodesList();
   if (selected.length === 0) return;
-
   const bounds = getSelectionBounds();
   if (!bounds) return;
+  const isPanel = false;
 
   // Selection outline
   const selBox = new Graphics();
@@ -698,9 +960,21 @@ function addResizeHandles(panelContainer: Container, zoom: number) {
   selBox.eventMode = 'none';
   panelContainer.addChild(selBox);
 
+  // Size label
+  const sizeLabel = new PixiText({
+    text: `${Math.round(bounds.w)} x ${Math.round(bounds.h)}`,
+    style: { fontSize: 9, fill: HANDLE_COLOR, fontFamily: 'monospace' },
+  });
+  sizeLabel.anchor.set(1, 0);
+  sizeLabel.x = bounds.x + bounds.w;
+  sizeLabel.y = bounds.y + bounds.h + 4;
+  sizeLabel.alpha = 0.6;
+  sizeLabel.eventMode = 'none';
+  panelContainer.addChild(sizeLabel);
+
   // If multi-select, also outline each individual node
-  if (selected.length > 1) {
-    for (const { node } of selected) {
+  if (!isPanel && selected.length > 1) {
+    for (const node of selected) {
       if (!('x' in node && 'y' in node)) continue;
       const n = node as { x: number; y: number; w?: number; h?: number; size?: number };
       const nw = n.w ?? n.size ?? 32;
@@ -713,12 +987,8 @@ function addResizeHandles(panelContainer: Container, zoom: number) {
     }
   }
 
-  // Check if resizable (single node with w/h/size, or multi = group resize)
-  const singleNode = selected.length === 1 ? selected[0].node : null;
-  const hasWH = singleNode ? ('w' in singleNode && 'h' in singleNode) : true;
-  const hasSize = singleNode ? ('size' in singleNode && !hasWH) : false;
-
-  // 8 resize handles on the bounding box
+  // Build edges from bounds
+  const origEdges: Edges = { l: bounds.x, t: bounds.y, r: bounds.x + bounds.w, b: bounds.y + bounds.h };
   const bx = bounds.x, by = bounds.y, bw = bounds.w, bh = bounds.h;
   const corners: Array<{ pos: string; cx: number; cy: number; cursor: string }> = [
     { pos: 'tl', cx: bx,          cy: by,          cursor: 'nwse-resize' },
@@ -747,9 +1017,10 @@ function addResizeHandles(panelContainer: Container, zoom: number) {
         active: true,
         handlePos: hp.pos,
         startGX: e.global.x, startGY: e.global.y,
-        origX: bx, origY: by,
-        origW: bw, origH: bh,
-        zoom, hasWH, hasSize,
+        origEdges: { ...origEdges },
+        zoom,
+        isPanel,
+        origContainerX: panelContainer.x, origContainerY: panelContainer.y,
       };
     });
 
@@ -757,69 +1028,17 @@ function addResizeHandles(panelContainer: Container, zoom: number) {
   }
 }
 
+
 // Panel resize state (survives rebuild)
-let panelResizeState: {
-  active: boolean;
-  edge: string; // 'r' | 'b' | 'br'
-  startGX: number; startGY: number;
-  origW: number; origH: number;
-  zoom: number;
-} | null = null;
-
-function addPanelResizeHandles(panelContainer: Container, def: PanelDef, zoom: number) {
-  const pw = def.w;
-  const ph = def.h;
-  const hs = 8;
-  const edgeColor = 0x888888;
-
-  const edges: Array<{ edge: string; x: number; y: number; w: number; h: number; cursor: string }> = [
-    // Right edge
-    { edge: 'r', x: pw - 3, y: ph / 4, w: 6, h: ph / 2, cursor: 'ew-resize' },
-    // Bottom edge
-    { edge: 'b', x: pw / 4, y: ph - 3, w: pw / 2, h: 6, cursor: 'ns-resize' },
-    // Bottom-right corner
-    { edge: 'br', x: pw - hs, y: ph - hs, w: hs, h: hs, cursor: 'nwse-resize' },
-  ];
-
-  for (const ed of edges) {
-    const g = new Graphics();
-    if (ed.edge === 'br') {
-      // Corner triangle
-      g.moveTo(ed.x + ed.w, ed.y);
-      g.lineTo(ed.x + ed.w, ed.y + ed.h);
-      g.lineTo(ed.x, ed.y + ed.h);
-      g.closePath();
-      g.fill({ color: edgeColor, alpha: 0.6 });
-    } else {
-      g.roundRect(ed.x, ed.y, ed.w, ed.h, 2);
-      g.fill({ color: edgeColor, alpha: 0.3 });
-    }
-    g.eventMode = 'static';
-    g.cursor = ed.cursor;
-
-    g.on('pointerdown', (e: import('pixi.js').FederatedPointerEvent) => {
-      e.stopPropagation();
-      pushHistory();
-      panelResizeState = {
-        active: true,
-        edge: ed.edge,
-        startGX: e.global.x, startGY: e.global.y,
-        origW: pw, origH: ph,
-        zoom,
-      };
-    });
-
-    panelContainer.addChild(g);
-  }
-}
 
 // Global drag state (survives rebuild)
 let dragState: {
   active: boolean;
-  nodeIndex: number;
+  node: PanelNode;
   startGX: number; startGY: number;
   origX: number; origY: number;
   zoom: number;
+  _historyPushed?: boolean;
 } | null = null;
 
 // Throttle rebuild calls during drag/resize for real-time visual
@@ -846,39 +1065,53 @@ function initResizeListener() {
       const dx = snap((e.global.x - rs.startGX) / rs.zoom);
       const dy = snap((e.global.y - rs.startGY) / rs.zoom);
 
-      let newX = rs.origX, newY = rs.origY, newW = rs.origW, newH = rs.origH;
-      if (rs.handlePos.includes('l')) { newX = rs.origX + dx; newW = rs.origW - dx; }
-      if (rs.handlePos.includes('r')) { newW = rs.origW + dx; }
-      if (rs.handlePos.includes('t')) { newY = rs.origY + dy; newH = rs.origH - dy; }
-      if (rs.handlePos.includes('b')) { newH = rs.origH + dy; }
-      newW = Math.max(8, newW); newH = Math.max(8, newH);
+      // New edges: only the dragged edges move
+      const ne: Edges = { ...rs.origEdges };
+      if (rs.handlePos.includes('l')) ne.l = rs.origEdges.l + dx;
+      if (rs.handlePos.includes('r')) ne.r = rs.origEdges.r + dx;
+      if (rs.handlePos.includes('t')) ne.t = rs.origEdges.t + dy;
+      if (rs.handlePos.includes('b')) ne.b = rs.origEdges.b + dy;
+      // Minimum size
+      if (ne.r - ne.l < 8) { if (rs.handlePos.includes('l')) ne.l = ne.r - 8; else ne.r = ne.l + 8; }
+      if (ne.b - ne.t < 8) { if (rs.handlePos.includes('t')) ne.t = ne.b - 8; else ne.b = ne.t + 8; }
 
-      const selected = getSelectedNodes();
-      if (selected.length === 1) {
-        const n = selected[0].node as { x: number; y: number; w?: number; h?: number; size?: number };
-        n.x = newX; n.y = newY;
-        if (rs.hasWH) { n.w = newW; n.h = newH; }
-        if (rs.hasSize) { n.size = Math.max(newW, newH); }
-      } else if (selected.length > 1 && rs.origW > 0 && rs.origH > 0) {
-        const scaleX = newW / rs.origW;
-        const scaleY = newH / rs.origH;
-        if (!resizeOriginals) {
-          resizeOriginals = selected.map(({ node }) => {
-            const sn = node as { x: number; y: number; w?: number; h?: number; size?: number };
-            return { x: sn.x, y: sn.y, w: sn.w ?? sn.size ?? 32, h: sn.h ?? sn.size ?? 32 };
+      if (rs.isPanel) {
+        // Panel: update edges — position is driven by edges directly
+        const def = getDef();
+        def.edges = { ...ne };
+        panelLInput.value = String(ne.l);
+        panelTInput.value = String(ne.t);
+        panelRInput.value = String(ne.r);
+        panelBInput.value = String(ne.b);
+      } else {
+        // Node(s): convert global edges back to local
+        const selected = getSelectedNodesList();
+        if (selected.length === 1) {
+          const offset = getParentOffset(selected[0], getDef().children) ?? { x: 0, y: 0 };
+          setNodeEdges(selected[0], {
+            l: ne.l - offset.x, t: ne.t - offset.y,
+            r: ne.r - offset.x, b: ne.b - offset.y,
           });
-        }
-        for (let i = 0; i < selected.length; i++) {
-          const sn = selected[i].node as { x: number; y: number; w?: number; h?: number; size?: number };
-          const orig = resizeOriginals[i];
-          sn.x = snap(newX + (orig.x - rs.origX) * scaleX);
-          sn.y = snap(newY + (orig.y - rs.origY) * scaleY);
-          if ('w' in sn && 'h' in sn) {
-            sn.w = Math.max(8, snap(orig.w * scaleX));
-            sn.h = Math.max(8, snap(orig.h * scaleY));
-          }
-          if ('size' in sn && !('w' in sn)) {
-            sn.size = Math.max(8, snap(Math.max(orig.w * scaleX, orig.h * scaleY)));
+        } else if (selected.length > 1) {
+          const ow = rs.origEdges.r - rs.origEdges.l;
+          const oh = rs.origEdges.b - rs.origEdges.t;
+          if (ow > 0 && oh > 0) {
+            const scaleX = (ne.r - ne.l) / ow;
+            const scaleY = (ne.b - ne.t) / oh;
+            if (!rs.origNodeEdges) {
+              rs.origNodeEdges = selected.map((node) => getGlobalEdges(node));
+            }
+            for (let i = 0; i < selected.length; i++) {
+              const orig = rs.origNodeEdges[i];
+              const offset = getParentOffset(selected[i], getDef().children) ?? { x: 0, y: 0 };
+              const scaled: Edges = {
+                l: snap(ne.l + (orig.l - rs.origEdges.l) * scaleX) - offset.x,
+                t: snap(ne.t + (orig.t - rs.origEdges.t) * scaleY) - offset.y,
+                r: snap(ne.l + (orig.r - rs.origEdges.l) * scaleX) - offset.x,
+                b: snap(ne.t + (orig.b - rs.origEdges.t) * scaleY) - offset.y,
+              };
+              setNodeEdges(selected[i], scaled);
+            }
           }
         }
       }
@@ -886,36 +1119,27 @@ function initResizeListener() {
       return;
     }
 
-    // Panel resize
-    if (panelResizeState?.active) {
-      const ps = panelResizeState;
-      const def = getDef();
-      const dx = snap((e.global.x - ps.startGX) / ps.zoom);
-      const dy = snap((e.global.y - ps.startGY) / ps.zoom);
-      if (ps.edge.includes('r')) def.w = Math.max(100, ps.origW + dx);
-      if (ps.edge.includes('b')) def.h = Math.max(80, ps.origH + dy);
-      panelWInput.value = String(def.w);
-      panelHInput.value = String(def.h);
-      scheduleRebuild();
-      return;
-    }
-
     // Drag
     if (dragState?.active) {
       const ds = dragState;
-      const node = getDef().children[ds.nodeIndex];
-      if (!node || !('x' in node && 'y' in node)) return;
-      const n = node as { x: number; y: number };
-      n.x = snap(ds.origX + (e.global.x - ds.startGX) / ds.zoom);
-      n.y = snap(ds.origY + (e.global.y - ds.startGY) / ds.zoom);
+      // Push history on first move
+      if (!ds._historyPushed) { pushHistory(); ds._historyPushed = true; }
+
+      const newX = snap(ds.origX + (e.global.x - ds.startGX) / ds.zoom);
+      const newY = snap(ds.origY + (e.global.y - ds.startGY) / ds.zoom);
+
+      // Update node position
+      const edges = getNodeEdges(ds.node);
+      const w = edges.r - edges.l;
+      const h = edges.b - edges.t;
+      setNodeEdges(ds.node, { l: newX, t: newY, r: newX + w, b: newY + h });
       scheduleRebuild();
     }
   });
 
   const endInteraction = () => {
-    if (resizeState) { resizeState.active = false; resizeState = null; resizeOriginals = null; }
+    if (resizeState) { resizeState.active = false; resizeState = null; }
     if (dragState) { dragState.active = false; dragState = null; }
-    if (panelResizeState) { panelResizeState.active = false; panelResizeState = null; }
   };
 
   app.stage.on('pointerup', endInteraction);
@@ -957,7 +1181,6 @@ async function rebuild() {
     app.stage.addChild(gameArea);
 
     // "Game area" label
-    const { Text: PixiText } = await import('pixi.js');
     const areaLabel = new PixiText({ text: 'Zone de jeu', style: { fontSize: 12, fill: 0x666666 } });
     areaLabel.x = vpX + 8; areaLabel.y = vpY + 8;
     app.stage.addChild(areaLabel);
@@ -978,70 +1201,112 @@ async function rebuild() {
     vpBorder.stroke({ color: 0x555555, width: 1 });
     app.stage.addChild(vpBorder);
 
-    // Panel inside viewport
+    // Panel inside viewport — positioned according to edges
     result = renderPanel(def);
-    const gameAreaH = (GAME_H - BANNER_H) * vpScale;
-    const fillPct = (def.viewport?.fillPercent ?? 75) / 100;
-    const fitScale = Math.min(
-      GAME_W * vpScale * fillPct / def.w,
-      gameAreaH * fillPct / def.h,
-    );
-    result.container.scale.set(fitScale);
-    result.container.x = vpX + (GAME_W * vpScale - def.w * fitScale) / 2;
-    result.container.y = vpY + (gameAreaH - def.h * fitScale) / 2;
+    // vpScale maps game pixels to screen pixels
+    result.container.scale.set(vpScale);
+    // Position using the panel's edges (l, t in game coordinates)
+    result.container.x = vpX + def.edges.l * vpScale;
+    result.container.y = vpY + def.edges.t * vpScale;
     app.stage.addChild(result.container);
+
+    // Show the grid workspace outline
+    const wsOutline = new Graphics();
+    wsOutline.rect(
+      vpX + def.edges.l * vpScale,
+      vpY + def.edges.t * vpScale,
+      (def.edges.r - def.edges.l) * vpScale,
+      (def.edges.b - def.edges.t) * vpScale,
+    );
+    wsOutline.stroke({ color: 0x0078d4, width: 1, alpha: 0.3 });
+    wsOutline.eventMode = 'none';
+    app.stage.addChild(wsOutline);
   } else {
-    // ─── Normal edit mode ───
+    // ─── Normal edit mode (centered, no viewport) ───
     result = renderPanel(def);
     result.container.scale.set(viewZoom);
-    result.container.x = Math.max(20, (app.screen.width - def.w * viewZoom) / 2);
-    result.container.y = Math.max(20, (app.screen.height - def.h * viewZoom) / 2);
+    result.container.x = (app.screen.width - def.w * viewZoom) / 2;
+    result.container.y = (app.screen.height - def.h * viewZoom) / 2;
+    // Note: in normal mode, edges don't affect visual position (panel is centered)
     app.stage.addChild(result.container);
   }
 
-  // Make nodes clickable to select + start drag
-  const zoomForDrag = viewportMode ? (result?.container.scale.x ?? 1) : viewZoom;
-  for (const entry of result!.nodes) {
-    entry.display.eventMode = 'static';
-    entry.display.cursor = 'move';
 
-    entry.display.on('pointerdown', (e) => {
-      e.stopPropagation();
-      const defIdx = getDef().children.indexOf(entry.node);
-      if (defIdx < 0) return;
+  // Track whether a node was clicked this frame (to prevent bg drag)
+  let nodeClickedThisFrame = false;
 
-      // Clear multi-select on single click (unless shift)
-      if (!e.shiftKey && selectedIndices.size > 0) {
-        selectedIndices.clear();
+  // Build set of user-selectable nodes (only nodes inside _body)
+  const bodyGroup = getBodyGroup(def);
+  const selectableNodes = new Set<PanelNode>();
+  if (bodyGroup) {
+    (function collectSelectable(nodes: PanelNode[]) {
+      for (const n of nodes) {
+        selectableNodes.add(n);
+        if ('children' in n && Array.isArray((n as {children:PanelNode[]}).children)) {
+          collectSelectable((n as {children:PanelNode[]}).children);
+        }
       }
-      if (e.shiftKey) {
-        selectedIndices.add(defIdx);
-      }
-      selectedIndex = defIdx;
-
-      // Start drag immediately — push history before mutation
-      if ('x' in entry.node && 'y' in entry.node) {
-        pushHistory();
-        const n = entry.node as { x: number; y: number };
-        dragState = {
-          active: true,
-          nodeIndex: defIdx,
-          startGX: e.global.x, startGY: e.global.y,
-          origX: n.x, origY: n.y,
-          zoom: zoomForDrag,
-        };
-      }
-
-      // Rebuild to show selection handles (won't break drag since state is global)
-      scheduleRebuild();
-    });
+    })(bodyGroup.children);
   }
 
-  // ─── Resize handles on selected node ───
-  addResizeHandles(result!.container, zoomForDrag);
+  const zoomForDrag = viewportMode ? (result?.container.scale.x ?? 1) : viewZoom;
+  for (const entry of result!.nodes) {
+    const isSelectable = selectableNodes.has(entry.node);
 
-  // ─── Panel border resize handles (right + bottom + corner) ───
-  addPanelResizeHandles(result!.container, def, zoomForDrag);
+    entry.display.eventMode = 'static';
+    entry.display.cursor = isSelectable ? 'move' : 'default';
+
+    if (isSelectable) {
+      // Create a transparent overlay in the root container (global coords)
+      // to ensure click detection works regardless of Container nesting
+      const ge = getGlobalEdges(entry.node);
+      const overlay = new Graphics();
+      overlay.rect(ge.l, ge.t, ge.r - ge.l, ge.b - ge.t);
+      overlay.fill({ color: 0x000000, alpha: 0.001 });
+      overlay.eventMode = 'static';
+      overlay.cursor = 'move';
+      result!.container.addChild(overlay);
+
+      overlay.on('pointerdown', (e) => {
+        e.stopPropagation();
+        nodeClickedThisFrame = true;
+
+        if (e.shiftKey) {
+          selectedNodes.add(entry.node);
+        } else {
+          selectSingle(entry.node);
+        }
+
+        // Setup drag
+        dragState = {
+          active: true,
+          node: entry.node,
+          startGX: e.global.x, startGY: e.global.y,
+          origX: ge.l, origY: ge.t,
+          zoom: zoomForDrag,
+        };
+
+        scheduleRebuild();
+      });
+    }
+  }
+
+  // ─── Click anywhere → deselect if no node was clicked ───
+  // Use app.stage so it catches clicks even on empty areas
+  app.stage.on('pointerdown', () => {
+    setTimeout(() => {
+      if (nodeClickedThisFrame) { nodeClickedThisFrame = false; return; }
+      if (selectedNode) {
+        clearSelection();
+        rebuild();
+      }
+    }, 0);
+  });
+
+  // ─── Resize handles on selected node (panel root is not resizable — use grid) ───
+  if (getSelectedNodesList().length > 0) {
+    addResizeHandles(result!.container, zoomForDrag);
+  }
 
   zoomLabel.textContent = `${Math.round(viewZoom * 100)}%`;
   renderTree();
@@ -1069,68 +1334,111 @@ window.addEventListener('beforeunload', (e) => {
   }
 });
 
+
 function showWelcome() {
-  // Destroy pixi app if any
   if (app) { app.destroy(true); app = null; }
 
   canvasWrap.innerHTML = '';
   const page = document.createElement('div');
   page.style.cssText = `
     width:100%; height:100%; overflow-y:auto;
-    background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+    background:#161616;
     display:flex; flex-direction:column; align-items:center;
-    padding:40px 20px;
+    padding:48px 24px 32px;
+    font-family: 'Segoe UI', system-ui, sans-serif;
   `;
+
+  // Subtle grid bg
+  const gridBg = document.createElement('div');
+  gridBg.style.cssText = `
+    position:absolute; inset:0; opacity:0.04; pointer-events:none;
+    background-image: linear-gradient(rgba(255,255,255,.15) 1px, transparent 1px),
+                      linear-gradient(90deg, rgba(255,255,255,.15) 1px, transparent 1px);
+    background-size: 40px 40px;
+  `;
+  page.style.position = 'relative';
+  page.appendChild(gridBg);
 
   // Header
   const hdr = document.createElement('div');
-  hdr.style.cssText = 'text-align:center;margin-bottom:32px';
+  hdr.style.cssText = 'text-align:center;margin-bottom:36px;position:relative;z-index:1';
   hdr.innerHTML = `
-    <div style="font-size:40px;margin-bottom:8px">⊞</div>
-    <h1 style="color:#e0e0e0;font-size:26px;font-weight:600;margin:0 0 6px">Dofus UI Builder</h1>
-    <p style="color:#7a8ba8;font-size:13px;margin:0">Éditeur d'interfaces HUD — Dofus 1.29</p>
+    <div style="color:#808080;margin-bottom:12px;display:inline-block">${ICON.layout}</div>
+    <h1 style="color:#e8e8e8;font-size:22px;font-weight:600;margin:0 0 6px;letter-spacing:-0.3px">UI Builder</h1>
+    <p style="color:#585858;font-size:12px;margin:0;font-weight:400">Panel editor for Dofus 1.29 HUD components</p>
   `;
   page.appendChild(hdr);
 
-  // Actions row
+  // Action buttons
   const actions = document.createElement('div');
-  actions.style.cssText = 'display:flex;gap:12px;max-width:520px;width:100%;margin-bottom:28px';
-  actions.appendChild(makeWelcomeBtn('+ Nouvelle interface', '#388a34', '#45a041', () => {
+  actions.style.cssText = 'display:flex;gap:10px;max-width:480px;width:100%;margin-bottom:32px;position:relative;z-index:1';
+
+  const newBtn = el('button', `
+    background:#2a2a2a; border:1px solid #383838; color:#d0d0d0; padding:12px 18px;
+    border-radius:6px; cursor:pointer; font-size:12px; flex:1;
+    transition:all 0.15s; font-weight:500; display:flex; align-items:center; justify-content:center; gap:7px;
+  `);
+  newBtn.innerHTML = `${ICON.plus} Nouvelle interface`;
+  hoverEffect(newBtn, '#333', '#2a2a2a', '#4a9');
+  newBtn.addEventListener('click', async () => {
+    const result = await showGridSelector();
+    if (!result) return;
     const name = prompt('Nom du panel:', 'mon-panel') || 'mon-panel';
-    const w = parseInt(prompt('Largeur:', '400') || '400');
-    const h = parseInt(prompt('Hauteur:', '300') || '300');
-    panels[name] = { name, w, h, bg: 0xddd7b2, border: 0x8a7f5f, borderWidth: 2, radius: 3, children: [], viewport: { position: 'center', fillPercent: 75 } };
+    const def = createPanelDef(name, result.w, result.h);
+    def.edges = result.edges;
+    panels[name] = def;
     openPanel(name);
-  }));
-  actions.appendChild(makeWelcomeBtn('📋 Coller du code TS', '#0e639c', '#1177bb', () => showPasteDialog()));
+  });
+  actions.appendChild(newBtn);
+
+  const pasteBtn = el('button', `
+    background:#2a2a2a; border:1px solid #383838; color:#d0d0d0; padding:12px 18px;
+    border-radius:6px; cursor:pointer; font-size:12px; flex:1;
+    transition:all 0.15s; font-weight:500; display:flex; align-items:center; justify-content:center; gap:7px;
+  `);
+  pasteBtn.innerHTML = `${ICON.code} Importer du code TS`;
+  hoverEffect(pasteBtn, '#333', '#2a2a2a', '#5a9fd4');
+  pasteBtn.addEventListener('click', () => showPasteDialog());
+  actions.appendChild(pasteBtn);
   page.appendChild(actions);
 
-  // ─── Import from project ───
-  page.appendChild(makeSectionTitle('Importer depuis le projet'));
-  const projectGrid = document.createElement('div');
-  projectGrid.style.cssText = 'display:grid;grid-template-columns:repeat(3,1fr);gap:8px;max-width:520px;width:100%;margin-bottom:28px';
+  // Project panels section
+  page.appendChild(sectionDivider('Panels du projet'));
+  const projectGrid = el('div', 'display:grid;grid-template-columns:repeat(3,1fr);gap:6px;max-width:480px;width:100%;margin-bottom:28px;position:relative;z-index:1');
   for (const pf of PROJECT_PANELS) {
-    projectGrid.appendChild(makeCard(pf.name, pf.desc, `📄 ${pf.path.split('/').pop()}`, '#c97b2a', async () => {
-      await importProjectPanel(pf);
-    }));
+    projectGrid.appendChild(panelCard(
+      pf.name,
+      pf.desc,
+      `${pf.path.split('/').pop()}`,
+      ICON.file,
+      '#b08840',
+      async () => { await importProjectPanel(pf); },
+    ));
   }
   page.appendChild(projectGrid);
 
-  // ─── Saved panels ───
+  // Saved panels
   const savedNames = Object.keys(panels);
   if (savedNames.length > 0) {
-    page.appendChild(makeSectionTitle(`Panels sauvegardés (${savedNames.length})`));
-    const savedGrid = document.createElement('div');
-    savedGrid.style.cssText = 'display:grid;grid-template-columns:repeat(3,1fr);gap:8px;max-width:520px;width:100%;margin-bottom:20px';
+    page.appendChild(sectionDivider(`Sauvegardés (${savedNames.length})`));
+    const savedGrid = el('div', 'display:grid;grid-template-columns:repeat(3,1fr);gap:6px;max-width:480px;width:100%;margin-bottom:20px;position:relative;z-index:1');
     for (const name of savedNames) {
       const p = panels[name];
-      savedGrid.appendChild(makeCard(name, `${p.w}×${p.h} · ${p.children?.length ?? 0} nodes`, '● sauvegardé', '#69c', () => openPanel(name)));
+      savedGrid.appendChild(panelCard(
+        name,
+        `${p.w} x ${p.h}  --  ${p.children?.length ?? 0} nodes`,
+        'local storage',
+        ICON.disk,
+        '#5a8fbf',
+        () => openPanel(name),
+      ));
     }
     page.appendChild(savedGrid);
 
-    const clearBtn = document.createElement('button');
-    clearBtn.textContent = 'Effacer les panels sauvegardés';
-    clearBtn.style.cssText = 'background:none;border:none;color:#4a5568;cursor:pointer;font-size:10px;text-decoration:underline;';
+    const clearBtn = el('button', 'background:none;border:none;color:#444;cursor:pointer;font-size:10px;position:relative;z-index:1;display:flex;align-items:center;gap:5px');
+    clearBtn.innerHTML = `${ICON.trash} Effacer les sauvegardes`;
+    clearBtn.addEventListener('mouseenter', () => { clearBtn.style.color = '#a44'; });
+    clearBtn.addEventListener('mouseleave', () => { clearBtn.style.color = '#444'; });
     clearBtn.addEventListener('click', () => {
       if (!confirm('Supprimer tous les panels sauvegardés ?')) return;
       localStorage.removeItem(STORAGE_KEY);
@@ -1140,49 +1448,59 @@ function showWelcome() {
     page.appendChild(clearBtn);
   }
 
+  // Shortcuts footer
+  const footer = el('div', 'position:relative;z-index:1;margin-top:auto;padding-top:24px;display:flex;gap:16px');
+  const shortcuts = [['Ctrl+Z', 'Undo'], ['Ctrl+S', 'Save'], ['Ctrl+A', 'Select all'], ['Del', 'Delete'], ['Ctrl+D', 'Duplicate']];
+  for (const [key, label] of shortcuts) {
+    const s = el('span', 'font-size:10px;color:#3a3a3a');
+    s.innerHTML = `<kbd style="background:#222;border:1px solid #333;padding:1px 5px;border-radius:3px;font-family:inherit;color:#555;font-size:9px">${key}</kbd> ${label}`;
+    footer.appendChild(s);
+  }
+  page.appendChild(footer);
+
   canvasWrap.appendChild(page);
 }
 
-function makeSectionTitle(text: string): HTMLDivElement {
-  const div = document.createElement('div');
-  div.style.cssText = 'display:flex;align-items:center;gap:12px;max-width:520px;width:100%;margin-bottom:12px';
+// ─── Welcome helpers ───
+
+function el(tag: string, css: string): HTMLElement {
+  const e = document.createElement(tag);
+  e.style.cssText = css;
+  return e;
+}
+
+function hoverEffect(btn: HTMLElement, hoverBg: string, baseBg: string, accentBorder: string) {
+  btn.addEventListener('mouseenter', () => { btn.style.background = hoverBg; btn.style.borderColor = accentBorder; btn.style.transform = 'translateY(-1px)'; });
+  btn.addEventListener('mouseleave', () => { btn.style.background = baseBg; btn.style.borderColor = '#383838'; btn.style.transform = 'none'; });
+}
+
+function sectionDivider(text: string): HTMLDivElement {
+  const div = el('div', 'display:flex;align-items:center;gap:12px;max-width:480px;width:100%;margin-bottom:10px;position:relative;z-index:1') as HTMLDivElement;
   div.innerHTML = `
-    <div style="flex:1;height:1px;background:rgba(255,255,255,0.1)"></div>
-    <span style="color:#7a8ba8;font-size:11px;text-transform:uppercase;letter-spacing:1px">${text}</span>
-    <div style="flex:1;height:1px;background:rgba(255,255,255,0.1)"></div>
+    <div style="flex:1;height:1px;background:#2a2a2a"></div>
+    <span style="color:#4a4a4a;font-size:10px;text-transform:uppercase;letter-spacing:1.2px;font-weight:500">${text}</span>
+    <div style="flex:1;height:1px;background:#2a2a2a"></div>
   `;
   return div;
 }
 
-function makeWelcomeBtn(text: string, bg: string, hover: string, onClick: () => void): HTMLButtonElement {
-  const btn = document.createElement('button');
-  btn.innerHTML = text;
-  btn.style.cssText = `
-    background:${bg}; border:none; color:#fff; padding:14px 20px;
-    border-radius:8px; cursor:pointer; font-size:13px; flex:1;
-    transition:all 0.2s; font-weight:500;
-  `;
-  btn.addEventListener('mouseenter', () => { btn.style.background = hover; btn.style.transform = 'translateY(-1px)'; });
-  btn.addEventListener('mouseleave', () => { btn.style.background = bg; btn.style.transform = 'none'; });
-  btn.addEventListener('click', onClick);
-  return btn;
-}
-
-function makeCard(title: string, desc: string, tag: string, tagColor: string, onClick: () => void): HTMLButtonElement {
+function panelCard(title: string, desc: string, tag: string, icon: string, accentColor: string, onClick: () => void): HTMLButtonElement {
   const card = document.createElement('button');
   card.style.cssText = `
-    background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); color:#ccc;
-    padding:14px 12px; border-radius:10px; cursor:pointer; font-size:12px; text-align:center;
-    transition:all 0.2s; display:flex; flex-direction:column; align-items:center; gap:4px;
-    backdrop-filter:blur(4px);
+    background:#1e1e1e; border:1px solid #2a2a2a; color:#b0b0b0;
+    padding:14px 10px 12px; border-radius:6px; cursor:pointer; font-size:11px; text-align:left;
+    transition:all 0.15s; display:flex; flex-direction:column; gap:5px;
   `;
   card.innerHTML = `
-    <div style="font-size:14px;font-weight:600">${title}</div>
-    <div style="font-size:9px;color:rgba(255,255,255,0.4)">${desc}</div>
-    <div style="font-size:9px;color:${tagColor};margin-top:2px">${tag}</div>
+    <div style="display:flex;align-items:center;gap:6px">
+      <span style="color:${accentColor}">${icon}</span>
+      <span style="font-size:12px;font-weight:600;color:#d0d0d0">${title}</span>
+    </div>
+    <div style="font-size:9px;color:#505050;line-height:1.3">${desc}</div>
+    <div style="font-size:9px;color:#3a3a3a;margin-top:1px">${tag}</div>
   `;
-  card.addEventListener('mouseenter', () => { card.style.background = 'rgba(255,255,255,0.1)'; card.style.borderColor = '#0078d4'; card.style.transform = 'translateY(-2px)'; });
-  card.addEventListener('mouseleave', () => { card.style.background = 'rgba(255,255,255,0.05)'; card.style.borderColor = 'rgba(255,255,255,0.1)'; card.style.transform = 'none'; });
+  card.addEventListener('mouseenter', () => { card.style.background = '#252525'; card.style.borderColor = accentColor + '66'; card.style.transform = 'translateY(-1px)'; });
+  card.addEventListener('mouseleave', () => { card.style.background = '#1e1e1e'; card.style.borderColor = '#2a2a2a'; card.style.transform = 'none'; });
   card.addEventListener('click', onClick);
   return card;
 }
@@ -1245,11 +1563,16 @@ function showPasteDialog(defaultName?: string) {
   const btnRow = document.createElement('div');
   btnRow.style.cssText = 'display:flex;gap:8px;';
 
-  btnRow.appendChild(makeWelcomeBtn('Annuler', '#555', '#666', () => {
-    overlay.remove();
-  }));
+  const cancelBtn = el('button', 'background:#333;border:1px solid #444;color:#ccc;padding:10px 18px;border-radius:6px;cursor:pointer;font-size:12px;flex:1;transition:all 0.15s') as HTMLButtonElement;
+  cancelBtn.textContent = 'Annuler';
+  hoverEffect(cancelBtn, '#444', '#333', '#666');
+  cancelBtn.addEventListener('click', () => { overlay.remove(); });
+  btnRow.appendChild(cancelBtn);
 
-  btnRow.appendChild(makeWelcomeBtn('Importer', '#0e639c', '#1177bb', () => {
+  const importBtn = el('button', 'background:#2a2a2a;border:1px solid #383838;color:#d0d0d0;padding:10px 18px;border-radius:6px;cursor:pointer;font-size:12px;flex:1;transition:all 0.15s;font-weight:500') as HTMLButtonElement;
+  importBtn.textContent = 'Importer';
+  hoverEffect(importBtn, '#333', '#2a2a2a', '#5a9fd4');
+  importBtn.addEventListener('click', () => {
     const source = textarea.value.trim();
     if (!source) { alert('Colle du code TypeScript'); return; }
     try {
@@ -1261,7 +1584,8 @@ function showPasteDialog(defaultName?: string) {
     } catch (e) {
       alert('Erreur de parsing: ' + (e as Error).message);
     }
-  }));
+  });
+  btnRow.appendChild(importBtn);
   modal.appendChild(btnRow);
 
   overlay.appendChild(modal);
@@ -1274,8 +1598,8 @@ function showPasteDialog(defaultName?: string) {
 
 function openPanel(name: string) {
   currentName = name;
-  selectedIndex = -1;
-  selectedIndices.clear();
+  clearSelection();
+  
   history.init(getDef());
   refreshPanelSelect();
   syncPanelInputs();

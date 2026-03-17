@@ -44,11 +44,36 @@ export interface NodeInteraction {
   dropTarget?: string;
 }
 
+// ─── Edges: the universal positioning model ──────────────────
+// Every element (including the panel itself) is defined by 4 edges.
+// l=left, t=top, r=right, b=bottom.
+// Width = r - l, Height = b - t.
+// x = l, y = t (for backward compat with renderers).
+
+export interface Edges {
+  l: number;  // left
+  t: number;  // top
+  r: number;  // right
+  b: number;  // bottom
+}
+
+/** Convert edges to x,y,w,h */
+export function edgesToRect(e: Edges) {
+  return { x: e.l, y: e.t, w: e.r - e.l, h: e.b - e.t };
+}
+
+/** Convert x,y,w,h to edges */
+export function rectToEdges(x: number, y: number, w: number, h: number): Edges {
+  return { l: x, t: y, r: x + w, b: y + h };
+}
+
 // ─── Base ────────────────────────────────────────────────────
 
 interface BaseNode {
   /** Interaction / protocol binding (optional on any node) */
   interaction?: NodeInteraction;
+  /** Edge-based positioning (preferred over x/y/w/h) */
+  edges?: Edges;
 }
 
 // ─── Leaf node types ─────────────────────────────────────────
@@ -122,9 +147,16 @@ export interface DividerNode extends BaseNode {
 
 export interface GroupNode extends BaseNode {
   type: 'group';
+  id?: string;
   x?: number;
   y?: number;
   children: PanelNode[];
+  /** Visual properties (when group acts as a container with background) */
+  fill?: number;
+  fillAlpha?: number;
+  radius?: number;
+  stroke?: number;
+  strokeWidth?: number;
 }
 
 export interface ColumnNode extends BaseNode {
@@ -193,22 +225,95 @@ export type PanelNode =
 
 // ─── Panel definition ────────────────────────────────────────
 
+/**
+ * PanelDef — a panel is just a root GroupNode with metadata.
+ *
+ * Structure:
+ *   Panel (root group, edges = full size)
+ *   ├── _bg      (rect: background fill)
+ *   ├── _header  (group: header bar)
+ *   │   ├── rect (header bg)
+ *   │   └── text (title)
+ *   ├── _body    (group: user content area)
+ *   │   ├── ...user nodes...
+ *   ├── _border  (rect: border overlay)
+ *
+ * The children array IS the node tree. Header and body are just nodes.
+ */
 export interface PanelDef {
   name: string;
+  edges?: Edges;
+  /** Derived from edges for convenience */
   w: number;
   h: number;
-  bg?: number;
-  bgAlpha?: number;
-  border?: number;
-  borderWidth?: number;
-  radius?: number;
+  /** The full node tree (bg, header, body, border are all nodes here) */
   children: PanelNode[];
 
   /** Viewport placement (for preview overlay) */
   viewport?: {
     position: 'center' | 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right';
-    fillPercent?: number;   // e.g. 75 = 75% of game area
+    fillPercent?: number;
     offsetX?: number;
     offsetY?: number;
+  };
+}
+
+// ─── Panel factory ───────────────────────────────────────────
+
+/** Create a new panel with the standard structure: bg + header + body + border */
+export function createPanelDef(
+  name: string,
+  w: number,
+  h: number,
+  opts?: { headerHeight?: number; bg?: number; headerBg?: number; border?: number; radius?: number },
+): PanelDef {
+  const hh = opts?.headerHeight ?? 24;
+  const bg = opts?.bg ?? 0xddd7b2;
+  const headerBg = opts?.headerBg ?? 0x5c5040;
+  const border = opts?.border ?? 0x8a7f5f;
+  const radius = opts?.radius ?? 3;
+
+  return {
+    name,
+    edges: { l: 0, t: 0, r: w, b: h },
+    w, h,
+    children: [
+      // Background
+      {
+        type: 'rect', x: 0, y: 0, w, h,
+        fill: bg, radius,
+        edges: { l: 0, t: 0, r: w, b: h },
+      },
+      // Header group
+      {
+        type: 'group', id: '_header',
+        edges: { l: 0, t: 0, r: w, b: hh },
+        fill: headerBg, radius,
+        children: [
+          { type: 'rect', x: 0, y: 0, w, h: hh, fill: headerBg, radius },
+          { type: 'rect', x: 0, y: radius, w, h: hh - radius, fill: headerBg },
+          { type: 'text', x: 10, y: hh / 2, value: name, size: 12, color: 0xffffff, bold: true, anchorY: 0.5 },
+          // Close button
+          { type: 'rect', x: w - 20, y: (hh - 16) / 2, w: 16, h: 16, fill: 0xcc4400, radius: 0,
+            edges: { l: w - 20, t: (hh - 16) / 2, r: w - 4, b: (hh - 16) / 2 + 16 },
+            interaction: { cursor: 'pointer', events: [{ event: 'click', emit: 'close' }] } },
+          { type: 'text', x: w - 12, y: hh / 2, value: 'x', size: 11, color: 0xffffff, bold: true, anchorX: 0.5, anchorY: 0.5 },
+        ],
+      },
+      // Body group (user content goes here)
+      {
+        type: 'group', id: '_body',
+        edges: { l: 0, t: hh, r: w, b: h },
+        children: [],
+      },
+      // Border overlay
+      {
+        type: 'rect', x: 0, y: 0, w, h,
+        stroke: border, strokeWidth: 2, radius,
+        fillAlpha: 0,
+        edges: { l: 0, t: 0, r: w, b: h },
+      },
+    ],
+    viewport: { position: 'center', fillPercent: 75 },
   };
 }

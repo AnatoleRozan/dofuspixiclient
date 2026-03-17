@@ -4,7 +4,19 @@
  */
 import { Assets, Container, Graphics, Sprite, Text, Texture } from 'pixi.js';
 import type { PanelDef, PanelNode } from './schema';
+import { edgesToRect } from './schema';
 import { COLORS, boldText, regularText } from './theme';
+
+/** Get x,y,w,h from a node — prefers edges if present, falls back to x/y/w/h or x/y/size */
+export function nodeRect(node: PanelNode): { x: number; y: number; w: number; h: number } {
+  if ('edges' in node && node.edges) return edgesToRect(node.edges);
+  const n = node as unknown as Record<string, unknown>;
+  const x = (n.x as number) ?? 0;
+  const y = (n.y as number) ?? 0;
+  const w = (n.w as number) ?? (n.size as number) ?? 32;
+  const h = (n.h as number) ?? (n.size as number) ?? 32;
+  return { x, y, w, h };
+}
 
 export interface RenderedSlot {
   id: string;
@@ -23,34 +35,15 @@ export interface RenderResult {
 export function renderPanel(def: PanelDef): RenderResult {
   const container = new Container();
   container.label = def.name;
+  container.eventMode = 'static';
 
   const slots = new Map<string, RenderedSlot>();
   const bars = new Map<string, { graphics: Graphics; redraw: (pct: number) => void }>();
   const nodes: RenderResult['nodes'] = [];
 
-  // Background
-  const bg = new Graphics();
-  bg.roundRect(0, 0, def.w, def.h, def.radius ?? 3);
-  bg.fill({ color: def.bg ?? COLORS.BG, alpha: def.bgAlpha ?? 1 });
-  if (def.border != null) {
-    bg.roundRect(0, 0, def.w, def.h, def.radius ?? 3);
-    bg.stroke({ color: def.border, width: def.borderWidth ?? 2 });
-  }
-  bg.eventMode = 'static';
-  container.addChild(bg);
-
-  // Render children
+  // Render all children — bg, header, body, border are all just nodes
   for (const child of def.children) {
     renderNode(child, container, slots, bars, nodes);
-  }
-
-  // Border overlay on top
-  if (def.border != null) {
-    const border = new Graphics();
-    border.roundRect(0, 0, def.w, def.h, def.radius ?? 3);
-    border.stroke({ color: def.border, width: def.borderWidth ?? 2 });
-    border.eventMode = 'none';
-    container.addChild(border);
   }
 
   return { container, slots, bars, nodes };
@@ -93,7 +86,7 @@ function renderNode(
         style.wordWrap = true;
         style.wordWrapWidth = node.wordWrapWidth;
       }
-      const t = new Text({ text: node.value, style });
+      const t = new Text({ text: node.value, style, resolution: Math.max(2, window.devicePixelRatio ?? 2) });
       t.x = node.x;
       t.y = node.y;
       if (node.anchorX != null || node.anchorY != null) {
@@ -189,8 +182,36 @@ function renderNode(
 
     case 'group': {
       const c = new Container();
-      c.x = node.x ?? 0;
-      c.y = node.y ?? 0;
+      c.eventMode = 'static'; // Required for child events to work
+      // Position from edges or x/y
+      if (node.edges) {
+        c.x = node.edges.l;
+        c.y = node.edges.t;
+      } else {
+        c.x = node.x ?? 0;
+        c.y = node.y ?? 0;
+      }
+      // Visual background (if group has fill/stroke)
+      if (node.fill != null || node.stroke != null) {
+        const gw = node.edges ? (node.edges.r - node.edges.l) : 0;
+        const gh = node.edges ? (node.edges.b - node.edges.t) : 0;
+        if (gw > 0 && gh > 0) {
+          const bg = new Graphics();
+          if (node.fill != null) {
+            if (node.radius) bg.roundRect(0, 0, gw, gh, node.radius);
+            else bg.rect(0, 0, gw, gh);
+            bg.fill({ color: node.fill, alpha: node.fillAlpha ?? 1 });
+          }
+          if (node.stroke != null) {
+            if (node.radius) bg.roundRect(0, 0, gw, gh, node.radius);
+            else bg.rect(0, 0, gw, gh);
+            bg.stroke({ color: node.stroke, width: node.strokeWidth ?? 1 });
+          }
+          bg.eventMode = 'static';
+          c.addChild(bg);
+        }
+      }
+      // Render children relative to group origin
       for (const child of node.children) {
         renderNode(child, c, slots, bars, nodes);
       }
