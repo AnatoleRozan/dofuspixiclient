@@ -21,6 +21,7 @@ import {
   encodeMessage,
   ServerMessageType,
 } from "@/network/protocol";
+import type { InventoryItem } from "@/hud/inventory";
 import type { CharacterStats } from "@/types/stats";
 
 export interface CharacterInfo {
@@ -128,6 +129,8 @@ export class GameClient {
       const stats = payload as CharacterStatsPayload;
       this.currentStats = stats as CharacterStats;
       this.battlefield?.getStatsPanel()?.updateStats(this.currentStats);
+      // Also update kamas in inventory panel
+      this.battlefield?.getInventoryPanel()?.updateKamas(stats.kama ?? 0);
     });
 
     // MAP_DATA — receive compressed map data from server
@@ -337,6 +340,48 @@ export class GameClient {
       }
     );
 
+    // SHOP_OPEN — merchant NPC opened the shop
+    this.messageHandler.on(
+      ServerMessageType.SHOP_OPEN,
+      (payload: any) => {
+        const { npcName, items } = payload as {
+          npcName: string;
+          items: Array<{
+            id: number;
+            name: string;
+            slot: number;
+            level: number;
+            price: number;
+            effects: Array<{ stat: string; value: number }>;
+            description: string;
+          }>;
+        };
+        console.log(`[GameClient] SHOP_OPEN from ${npcName}: ${items.length} items`);
+        const kamas = this.currentStats?.kama ?? 0;
+        this.battlefield?.showShop(npcName, items, kamas);
+      }
+    );
+
+    // INVENTORY_DATA — initial full inventory
+    this.messageHandler.on(
+      ServerMessageType.INVENTORY_DATA,
+      (payload: any) => {
+        const items = (payload.items ?? []) as InventoryItem[];
+        console.log("[GameClient] INVENTORY_DATA:", items.length, "entries");
+        this.battlefield?.getInventoryPanel()?.updateInventory(items);
+      }
+    );
+
+    // INVENTORY_UPDATE — inventory changed (after buy/equip/unequip)
+    this.messageHandler.on(
+      ServerMessageType.INVENTORY_UPDATE,
+      (payload: any) => {
+        const items = (payload.items ?? []) as InventoryItem[];
+        console.log("[GameClient] INVENTORY_UPDATE:", items.length, "entries");
+        this.battlefield?.getInventoryPanel()?.updateInventory(items);
+      }
+    );
+
     // MAP_NEIGHBORS — preload adjacent map data for instant transitions
     this.messageHandler.on(
       ServerMessageType.MAP_NEIGHBORS,
@@ -369,6 +414,9 @@ export class GameClient {
     this.battlefield.setOnMinimapTeleport((mapId) => this.handleMinimapTeleport(mapId));
     this.battlefield.setOnBoostStat((statId) => this.boostStat(statId));
     this.battlefield.setOnNpcClick((npcId) => this.interactNpc(npcId));
+    this.battlefield.setOnShopBuy((itemId) => this.shopBuy(itemId));
+    this.battlefield.setOnEquip((itemId) => this.inventoryEquip(itemId));
+    this.battlefield.setOnUnequip((slot) => this.inventoryUnequip(slot));
 
     // If stats were received before battlefield was set, update the panel now
     if (this.currentStats) {
@@ -448,6 +496,27 @@ export class GameClient {
     console.log(`[GameClient] Interacting with NPC ${npcId}`);
     this.connection.send(
       encodeMessage(ClientMessageType.INTERACT_NPC, { npcId })
+    );
+  }
+
+  shopBuy(itemId: number): void {
+    console.log(`[GameClient] Buying item ${itemId}`);
+    this.connection.send(
+      encodeMessage(ClientMessageType.SHOP_BUY, { itemId })
+    );
+  }
+
+  inventoryEquip(itemId: number): void {
+    console.log(`[GameClient] Equipping item ${itemId}`);
+    this.connection.send(
+      encodeMessage(ClientMessageType.INVENTORY_EQUIP, { itemId })
+    );
+  }
+
+  inventoryUnequip(slot: number): void {
+    console.log(`[GameClient] Unequipping slot ${slot}`);
+    this.connection.send(
+      encodeMessage(ClientMessageType.INVENTORY_UNEQUIP, { slot })
     );
   }
 

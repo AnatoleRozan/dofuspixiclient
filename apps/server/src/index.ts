@@ -1,5 +1,6 @@
 import { Elysia } from "elysia";
 
+import { runMigrations } from "./db/database.ts";
 import { getMapInstanceCount, getOnlineCount } from "./game/game-manager.ts";
 import { tickMonsters } from "./game/monster-spawner.ts";
 import { registerTickHandler, startTickLoop } from "./tick.ts";
@@ -22,6 +23,9 @@ const app = new Elysia()
 
 // Store the Bun server reference for topic broadcasting (used by monster AI)
 setServer(app.server!);
+
+// Run lightweight DB migrations (add columns if missing)
+await runMigrations();
 
 // Start the 20Hz game tick loop
 startTickLoop();

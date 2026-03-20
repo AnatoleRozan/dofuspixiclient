@@ -17,3 +17,18 @@ const pool = new Pool({
 export const db = new Kysely<Database>({
   dialect: new PostgresDialect({ pool }),
 });
+
+/**
+ * Run lightweight migrations on startup.
+ * Adds columns that may not yet exist (idempotent).
+ */
+export async function runMigrations(): Promise<void> {
+  try {
+    await pool.query(`
+      ALTER TABLE characters ADD COLUMN IF NOT EXISTS inventory JSONB DEFAULT '[]';
+    `);
+    console.log("[DB] Migrations applied.");
+  } catch (err) {
+    console.error("[DB] Migration error:", err);
+  }
+}

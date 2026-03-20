@@ -1,6 +1,7 @@
 import type { BoostStatPayload, CharacterStatsPayload } from "../protocol/types.ts";
 import { db } from "../db/database.ts";
 import { getCharacterById } from "../game/character.ts";
+import { getEquipmentBonuses } from "../game/inventory.ts";
 import { encodeServerMessage } from "../protocol/codec.ts";
 import { ServerMessageType } from "../protocol/types.ts";
 import type { ClientSession } from "../ws/client-session.ts";
@@ -154,14 +155,18 @@ const STAT_COLUMNS = {
   [STAT_INTELLIGENCE]: "intelligence",
 } as const;
 
-export function buildCharacterStatsPayload(character: any): CharacterStatsPayload {
+export function buildCharacterStatsPayload(
+  character: any,
+  equipBonuses?: { vitality: number; wisdom: number; strength: number; chance: number; agility: number; intelligence: number },
+): CharacterStatsPayload {
+  const eb = equipBonuses ?? { vitality: 0, wisdom: 0, strength: 0, chance: 0, agility: 0, intelligence: 0 };
   return {
-    vitality: { base: character.vitality ?? 0, items: 0, boost: 0 },
-    wisdom: { base: character.wisdom ?? 0, items: 0, boost: 0 },
-    strength: { base: character.strength ?? 0, items: 0, boost: 0 },
-    chance: { base: character.chance ?? 0, items: 0, boost: 0 },
-    agility: { base: character.agility ?? 0, items: 0, boost: 0 },
-    intelligence: { base: character.intelligence ?? 0, items: 0, boost: 0 },
+    vitality: { base: character.vitality ?? 0, items: eb.vitality, boost: 0 },
+    wisdom: { base: character.wisdom ?? 0, items: eb.wisdom, boost: 0 },
+    strength: { base: character.strength ?? 0, items: eb.strength, boost: 0 },
+    chance: { base: character.chance ?? 0, items: eb.chance, boost: 0 },
+    agility: { base: character.agility ?? 0, items: eb.agility, boost: 0 },
+    intelligence: { base: character.intelligence ?? 0, items: eb.intelligence, boost: 0 },
     hp: character.hp ?? 55,
     maxHp: character.max_hp ?? 55,
     ap: character.ap ?? 6,
@@ -188,7 +193,8 @@ export async function sendCharacterStats(session: ClientSession): Promise<void> 
   const character = await getCharacterById(session.characterId);
   if (!character) return;
 
-  const stats = buildCharacterStatsPayload(character);
+  const equipBonuses = await getEquipmentBonuses(session.characterId);
+  const stats = buildCharacterStatsPayload(character, equipBonuses);
   session.ws.send(encodeServerMessage(ServerMessageType.CHARACTER_STATS, stats));
 }
 

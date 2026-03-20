@@ -57,6 +57,16 @@ registerNpc({
   direction: 3,
 });
 
+// Marchand d'équipements PvP, zaap d'Astrub [4, -19] (map 7411)
+registerNpc({
+  id: -100_002,
+  name: "Marchand d'Armes",
+  gfxId: 9062,
+  mapId: 7411,
+  cellId: 330,
+  direction: 1,
+});
+
 /* ------------------------------------------------------------------ */
 /*  Spawn helpers                                                      */
 /* ------------------------------------------------------------------ */

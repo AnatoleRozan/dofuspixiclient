@@ -13,6 +13,7 @@ import {
   handleMovement,
 } from "../handlers/movement.ts";
 import { handleInteractNpc } from "../handlers/npc.ts";
+import { handleInventoryEquip, handleInventoryUnequip, handleShopBuy } from "../handlers/shop.ts";
 import { handleBoostStat, handleDebugGiveCapital } from "../handlers/stats.ts";
 import { decodeClientMessage, encodeServerMessage } from "../protocol/codec.ts";
 import { ClientMessageType, ServerMessageType } from "../protocol/types.ts";
@@ -63,6 +64,9 @@ export const gameWs = new Elysia().ws("/game", {
         .with(ClientMessageType.CHARACTER_BOOST_STAT, () => handleBoostStat(session, msg.payload as any))
         .with(ClientMessageType.DEBUG_GIVE_CAPITAL, () => handleDebugGiveCapital(session, msg.payload as any))
         .with(ClientMessageType.INTERACT_NPC, () => handleInteractNpc(session, msg.payload as any))
+        .with(ClientMessageType.SHOP_BUY, () => handleShopBuy(session, msg.payload as any))
+        .with(ClientMessageType.INVENTORY_EQUIP, () => handleInventoryEquip(session, msg.payload as any))
+        .with(ClientMessageType.INVENTORY_UNEQUIP, () => handleInventoryUnequip(session, msg.payload as any))
         .with(ClientMessageType.PING, () => {
           ws.raw.send(encodeServerMessage(ServerMessageType.PONG, { time: Date.now() }));
         })

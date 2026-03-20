@@ -105,6 +105,7 @@ export class Banner {
   private onMinimapTeleport?: (mapId: number) => void;
   private onStatsToggle?: () => void;
   private onMapToggle?: () => void;
+  private onInventoryToggle?: () => void;
 
   constructor(app: Application, displayHeight: number) {
     this.app = app;
@@ -229,6 +230,14 @@ export class Banner {
     if (statsBtn) {
       statsBtn.button.container.on('pointerdown', () => {
         this.onStatsToggle?.();
+      });
+    }
+
+    // Wire inventory button (index 1) to toggle callback
+    const invBtn = this.iconButtons[1];
+    if (invBtn) {
+      invBtn.button.container.on('pointerdown', () => {
+        this.onInventoryToggle?.();
       });
     }
 
@@ -666,6 +675,18 @@ export class Banner {
 
   public setOnMapToggle(callback: () => void): void {
     this.onMapToggle = callback;
+  }
+
+  public setOnInventoryToggle(callback: () => void): void {
+    this.onInventoryToggle = callback;
+  }
+
+  public setInventoryPressed(pressed: boolean): void {
+    const invButton = this.iconButtons[1]?.button;
+    if (invButton) {
+      invButton.isPressed = pressed;
+      invButton.button.texture = pressed ? invButton.buttonDownTexture : invButton.buttonUpTexture;
+    }
   }
 
   public setStatsPressed(pressed: boolean): void {

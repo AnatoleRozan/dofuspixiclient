@@ -62,6 +62,7 @@ export interface CharactersTable {
   xp_low: number;
   xp_high: number;
   kama: number;
+  inventory: string; // JSONB — InventoryEntry[]
   initiative: number;
   discernment: number;
   range: number;

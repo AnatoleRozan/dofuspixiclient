@@ -16,7 +16,9 @@ import { type GameWorld, getGameWorld } from "@/ecs/world";
 import { Banner } from "@/hud/banner";
 import { initTooltipBounds } from "@/hud/core/tooltip";
 import { NpcDialogue } from "@/hud/dialogue";
+import { InventoryPanel } from "@/hud/inventory";
 import { LocationDisplay } from "@/hud/location";
+import { ShopPanel, type ShopItem } from "@/hud/shop";
 import { StatsPanel } from "@/hud/stats";
 import { WorldMapPanel } from "@/hud/worldmap";
 import { AtlasLoader } from "@/render/atlas-loader";
@@ -96,6 +98,8 @@ export class Battlefield {
   private statsPanel: StatsPanel | null = null;
   private worldMapPanel: WorldMapPanel | null = null;
   private locationDisplay: LocationDisplay | null = null;
+  private inventoryPanel: InventoryPanel | null = null;
+  private shopPanel: ShopPanel | null = null;
   private npcDialogue: NpcDialogue | null = null;
 
   private currentMapData: MapData | null = null;
@@ -136,6 +140,9 @@ export class Battlefield {
   private onMinimapTeleportCallback?: (mapId: number) => void;
   private onBoostStatCallback?: (statId: number) => void;
   private onNpcClickCallback?: (npcId: number) => void;
+  private onShopBuyCallback?: (itemId: number) => void;
+  private onEquipCallback?: (itemId: number) => void;
+  private onUnequipCallback?: (slot: number) => void;
 
   private onResizeStartCallback?: () => void;
   private onResizeEndCallback?: () => void;
@@ -317,6 +324,32 @@ export class Battlefield {
       this.banner?.setStatsPressed(false);
     });
     this.app.stage.addChild(this.statsPanel.container);
+
+    // Inventory panel — same side as stats
+    this.inventoryPanel = new InventoryPanel(baseZoom);
+    this.updateInventoryPanelPosition();
+    this.inventoryPanel.setOnClose(() => {
+      this.banner?.setInventoryPressed(false);
+    });
+    this.inventoryPanel.setOnEquip((itemId) => {
+      this.onEquipCallback?.(itemId);
+    });
+    this.inventoryPanel.setOnUnequip((slot) => {
+      this.onUnequipCallback?.(slot);
+    });
+    this.app.stage.addChild(this.inventoryPanel.container);
+
+    // Wire inventory button (index 1) in banner
+    this.banner.setOnInventoryToggle(() => {
+      this.inventoryPanel?.toggle();
+    });
+
+    // Shop panel — modal, on top of everything
+    this.shopPanel = new ShopPanel();
+    this.shopPanel.setOnBuy((itemId) => {
+      this.onShopBuyCallback?.(itemId);
+    });
+    this.app.stage.addChild(this.shopPanel.container);
 
     // NPC dialogue panel — on top of everything
     this.npcDialogue = new NpcDialogue();
@@ -872,6 +905,22 @@ export class Battlefield {
       Math.round(this.app.screen.width - this.statsPanel.panelW - 4),
       Math.round((bannerY - this.statsPanel.panelH) / 2)
     );
+
+    this.updateInventoryPanelPosition();
+  }
+
+  private updateInventoryPanelPosition(): void {
+    if (!this.app || !this.inventoryPanel) return;
+    const zoom = this.engine.getBaseZoom();
+    const bannerY = Math.floor(DISPLAY_HEIGHT * zoom);
+
+    this.inventoryPanel.rebuild(zoom);
+    // Place to the left of the stats panel
+    const statsW = this.statsPanel?.panelW ?? 0;
+    this.inventoryPanel.setPosition(
+      Math.round(this.app.screen.width - statsW - this.inventoryPanel.panelW - 8),
+      Math.round((bannerY - this.inventoryPanel.panelH) / 2)
+    );
   }
 
   setOnCellClick(callback: (cellId: number) => void): void {
@@ -888,6 +937,33 @@ export class Battlefield {
 
   setOnNpcClick(callback: (npcId: number) => void): void {
     this.onNpcClickCallback = callback;
+  }
+
+  setOnShopBuy(callback: (itemId: number) => void): void {
+    this.onShopBuyCallback = callback;
+  }
+
+  setOnEquip(callback: (itemId: number) => void): void {
+    this.onEquipCallback = callback;
+  }
+
+  setOnUnequip(callback: (slot: number) => void): void {
+    this.onUnequipCallback = callback;
+  }
+
+  showShop(npcName: string, items: ShopItem[], kamas: number): void {
+    if (!this.app || !this.shopPanel) return;
+    this.shopPanel.show(
+      npcName,
+      items,
+      kamas,
+      this.app.screen.width,
+      this.app.screen.height,
+    );
+  }
+
+  getInventoryPanel(): InventoryPanel | null {
+    return this.inventoryPanel;
   }
 
   showNpcDialogue(npcName: string, messages: string[]): void {
@@ -1019,6 +1095,10 @@ export class Battlefield {
     this.statsPanel = null;
     this.locationDisplay?.destroy();
     this.locationDisplay = null;
+    this.inventoryPanel?.destroy();
+    this.inventoryPanel = null;
+    this.shopPanel?.destroy();
+    this.shopPanel = null;
     this.npcDialogue?.destroy();
     this.npcDialogue = null;
     this.worldMapPanel?.destroy();

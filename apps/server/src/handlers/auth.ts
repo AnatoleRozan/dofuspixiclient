@@ -27,6 +27,7 @@ import {
 } from "../ws/client-session.ts";
 import { spawnMonstersForMap } from "../game/monster-spawner.ts";
 import { spawnNpcsForMap } from "../game/npc-spawner.ts";
+import { sendInventoryData } from "./shop.ts";
 import { sendCharacterStats } from "./stats.ts";
 
 export async function handleLogin(
@@ -117,6 +118,9 @@ export async function handleCharacterSelect(
 
   // Send CHARACTER_STATS
   await sendCharacterStats(session);
+
+  // Send INVENTORY_DATA
+  await sendInventoryData(session);
 
   // Send MAP_DATA
   const map = await getMap(character.map_id);

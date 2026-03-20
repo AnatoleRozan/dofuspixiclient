@@ -2,6 +2,8 @@ export * from "./banner";
 export * from "./combat";
 export * from "./core";
 export * from "./dialogue";
+export * from "./inventory";
 export * from "./location";
+export * from "./shop";
 export * from "./stats";
 export * from "./worldmap";

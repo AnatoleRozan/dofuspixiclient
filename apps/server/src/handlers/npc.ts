@@ -1,5 +1,6 @@
 import { db } from "../db/database.ts";
 import { getCharacterById } from "../game/character.ts";
+import { getItemCatalogForShop } from "../game/items.ts";
 import { getNpc, isNpcId } from "../game/npc-spawner.ts";
 import { encodeServerMessage } from "../protocol/codec.ts";
 import { ServerMessageType } from "../protocol/types.ts";
@@ -13,8 +14,9 @@ import { sendCharacterStats } from "./stats.ts";
 /** Kamas reward from Otomaï */
 const OTOMAI_KAMA_REWARD = 1_000_000;
 
-/** Otomaï NPC ID */
+/** NPC IDs */
 const OTOMAI_NPC_ID = -100_001;
+const MERCHANT_NPC_ID = -100_002;
 
 /* ------------------------------------------------------------------ */
 /*  NPC interaction handler                                            */
@@ -46,6 +48,8 @@ export async function handleInteractNpc(
   // Dispatch to the right NPC script
   if (npcId === OTOMAI_NPC_ID) {
     await handleOtomaiInteraction(session);
+  } else if (npcId === MERCHANT_NPC_ID) {
+    handleMerchantInteraction(session);
   }
 }
 
@@ -86,4 +90,29 @@ async function handleOtomaiInteraction(session: ClientSession): Promise<void> {
 
   // Send updated stats (so kama count updates in UI)
   await sendCharacterStats(session);
+}
+
+/* ------------------------------------------------------------------ */
+/*  Marchand d'Armes script — opens the shop                          */
+/* ------------------------------------------------------------------ */
+
+function handleMerchantInteraction(session: ClientSession): void {
+  const items = getItemCatalogForShop();
+
+  session.ws.send(
+    encodeServerMessage(ServerMessageType.SHOP_OPEN, {
+      npcName: "Marchand d'Armes",
+      items: items.map((item) => ({
+        id: item.id,
+        name: item.name,
+        slot: item.slot,
+        level: item.level,
+        price: item.price,
+        effects: item.effects,
+        description: item.description,
+      })),
+    })
+  );
+
+  console.log(`[NPC] Opened shop for ${session.characterName}`);
 }
