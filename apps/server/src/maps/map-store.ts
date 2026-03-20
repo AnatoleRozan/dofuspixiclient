@@ -93,3 +93,59 @@ export async function mapExists(mapId: number): Promise<boolean> {
   const map = await getMap(mapId);
   return map !== null;
 }
+
+/**
+ * Find the 4 adjacent maps (N, S, E, W) by coordinate offset.
+ * Returns an array of { mapId, width, height, background, cellsGzip } for each neighbor found.
+ */
+export async function getAdjacentMaps(
+  mapId: number
+): Promise<
+  Array<{
+    mapId: number;
+    width: number;
+    height: number;
+    background: number;
+    cellsGzip: Buffer;
+  }>
+> {
+  const map = await getMap(mapId);
+  if (!map) return [];
+
+  const offsets = [
+    { dx: 0, dy: -1 }, // North
+    { dx: 0, dy: 1 },  // South
+    { dx: 1, dy: 0 },  // East
+    { dx: -1, dy: 0 }, // West
+  ];
+
+  const results: Array<{
+    mapId: number;
+    width: number;
+    height: number;
+    background: number;
+    cellsGzip: Buffer;
+  }> = [];
+
+  for (const { dx, dy } of offsets) {
+    const row = await db
+      .selectFrom("maps")
+      .select(["id", "width", "height", "background", "cells_gzip"])
+      .where("x", "=", map.x + dx)
+      .where("y", "=", map.y + dy)
+      .where("superarea", "=", map.superarea)
+      .executeTakeFirst();
+
+    if (row && row.cells_gzip) {
+      results.push({
+        mapId: row.id,
+        width: row.width,
+        height: row.height,
+        background: row.background ?? 0,
+        cellsGzip: row.cells_gzip,
+      });
+    }
+  }
+
+  return results;
+}

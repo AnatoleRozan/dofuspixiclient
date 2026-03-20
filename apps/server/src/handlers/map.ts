@@ -11,7 +11,7 @@ import {
   getOrCreateMapInstance,
 } from "../game/game-manager.ts";
 import { spawnMonstersForMap } from "../game/monster-spawner.ts";
-import { getCompressedMap, getMap, mapExists } from "../maps/map-store.ts";
+import { getAdjacentMaps, getCompressedMap, getMap, mapExists } from "../maps/map-store.ts";
 import { getPathfinding } from "../maps/pathfinding.ts";
 import { encodeServerMessage } from "../protocol/codec.ts";
 import { ServerMessageType } from "../protocol/types.ts";
@@ -139,6 +139,9 @@ export async function changeMap(
       compressed: new Uint8Array(compressed),
       encoding: "gzip",
       triggerCellIds,
+      subareaId: map.superarea,
+      x: map.x,
+      y: map.y,
     })
   );
 
@@ -173,4 +176,28 @@ export async function changeMap(
   if (newPf) {
     newPf.addOccupied(newCellId);
   }
+
+  // Send adjacent map data for preloading (non-blocking)
+  void sendNeighborMaps(session, newMapId);
+}
+
+async function sendNeighborMaps(
+  session: ClientSession,
+  mapId: number
+): Promise<void> {
+  const neighbors = await getAdjacentMaps(mapId);
+  if (neighbors.length === 0) return;
+
+  const maps = neighbors.map((n) => ({
+    mapId: n.mapId,
+    width: n.width,
+    height: n.height,
+    background: n.background,
+    compressed: n.cellsGzip,
+    encoding: "gzip" as const,
+  }));
+
+  session.ws.send(
+    encodeServerMessage(ServerMessageType.MAP_NEIGHBORS, { maps })
+  );
 }

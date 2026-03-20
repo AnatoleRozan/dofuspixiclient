@@ -15,6 +15,7 @@ import { DISPLAY_HEIGHT } from "@/constants/battlefield";
 import { type GameWorld, getGameWorld } from "@/ecs/world";
 import { Banner } from "@/hud/banner";
 import { initTooltipBounds } from "@/hud/core/tooltip";
+import { LocationDisplay } from "@/hud/location";
 import { StatsPanel } from "@/hud/stats";
 import { WorldMapPanel } from "@/hud/worldmap";
 import { AtlasLoader } from "@/render/atlas-loader";
@@ -91,6 +92,7 @@ export class Battlefield {
   private banner: Banner | null = null;
   private statsPanel: StatsPanel | null = null;
   private worldMapPanel: WorldMapPanel | null = null;
+  private locationDisplay: LocationDisplay | null = null;
 
   private currentMapData: MapData | null = null;
   private cellDataMap: Map<number, CellData> = new Map();
@@ -171,6 +173,8 @@ export class Battlefield {
     if (this.interactionHandler) {
       this.interactionHandler.setBaseZoom(this.engine.getBaseZoom());
     }
+
+    this.locationDisplay?.setZoom(this.engine.getBaseZoom());
 
     if (this.debugOverlay) {
       this.debugOverlay.setScreenSize(width, height);
@@ -291,6 +295,12 @@ export class Battlefield {
 
     // Banner — always on top of world map
     this.app.stage.addChild(this.banner.getGraphics());
+
+    // Location display — top-left of game area, shows [x, y] + zone name
+    this.locationDisplay = new LocationDisplay();
+    this.locationDisplay.setZoom(baseZoom);
+    this.locationDisplay.container.position.set(4, 4);
+    this.app.stage.addChild(this.locationDisplay.container);
 
     // Stats panel — anchored above the banner, right side
     this.statsPanel = new StatsPanel(this.engine.getBaseZoom());
@@ -432,6 +442,10 @@ export class Battlefield {
     this.banner?.updateMinimapPosition(mapId);
   }
 
+  updateLocation(mapId: number): void {
+    this.locationDisplay?.updateForMap(mapId);
+  }
+
   async loadMapFromData(mapData: MapData): Promise<void> {
     if (
       !this.mapContainer ||
@@ -501,6 +515,28 @@ export class Battlefield {
 
   revealMap(): void {
     // No-op now — mapContainer is never hidden.
+  }
+
+  /**
+   * Pre-fetch tile textures for a map so that rendering is near-instant
+   * when the player actually moves to that map.
+   */
+  async prefetchMapTiles(mapData: MapData): Promise<void> {
+    if (!this.atlasLoader) return;
+
+    const uniqueTileKeys = new Set<string>();
+    if (mapData.backgroundNum && mapData.backgroundNum > 0) {
+      uniqueTileKeys.add(`ground_${mapData.backgroundNum}`);
+    }
+    for (const cell of mapData.cells) {
+      if (cell.ground > 0) uniqueTileKeys.add(`ground_${cell.ground}`);
+      if (cell.layer1 > 0) uniqueTileKeys.add(`objects_${cell.layer1}`);
+      if (cell.layer2 > 0) uniqueTileKeys.add(`objects_${cell.layer2}`);
+    }
+
+    if (uniqueTileKeys.size > 0) {
+      await this.atlasLoader.prefetchTiles([...uniqueTileKeys], 1);
+    }
   }
 
   /** Set the player character ID (used for tracking). */
@@ -952,6 +988,8 @@ export class Battlefield {
 
     this.statsPanel?.destroy();
     this.statsPanel = null;
+    this.locationDisplay?.destroy();
+    this.locationDisplay = null;
     this.worldMapPanel?.destroy();
     this.worldMapPanel = null;
     this.interactionHandler?.destroy();

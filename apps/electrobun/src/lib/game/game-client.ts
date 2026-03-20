@@ -3,6 +3,7 @@ import type { Battlefield } from "@/ank/battlefield";
 import type { GameWorld } from "@/ecs/world";
 import {
   loadMapDataFromServer,
+  type MapData,
   type ServerMapDataPayload,
 } from "@/ank/battlefield/datacenter/map";
 import { DofusPathfinding } from "@/ank/battlefield/dofus-pathfinding";
@@ -56,6 +57,8 @@ export class GameClient {
   private mapGeneration = 0;
   /** True while a map transition is in progress (between MAP_DATA and revealMap). */
   private mapTransitioning = false;
+  /** Cache of pre-loaded neighbor map data (keyed by mapId). */
+  private preloadedMaps = new Map<number, MapData>();
 
   private onCharacterList?: (characters: CharacterInfo[]) => void;
   private onLoginFailed?: (reason: string) => void;
@@ -140,7 +143,12 @@ export class GameClient {
       this.mapTransitioning = true;
 
       try {
-        const mapData = loadMapDataFromServer(serverPayload);
+        // Use preloaded data if available (tiles already prefetched → near-instant render)
+        const cached = this.preloadedMaps.get(serverPayload.mapId);
+        const mapData = cached ?? loadMapDataFromServer(serverPayload);
+        if (cached) {
+          console.log("[GameClient] Using preloaded map data for", serverPayload.mapId);
+        }
         this.currentMapId = serverPayload.mapId;
 
         // Reset movement state — a map change interrupts any in-progress movement
@@ -176,6 +184,9 @@ export class GameClient {
           // Store the promise so MAP_ACTORS can wait for map rendering to finish
           this.mapLoadPromise = this.battlefield.loadMapFromData(mapData);
           this.battlefield.updateMinimapPosition(serverPayload.mapId);
+
+          // Update location display with coordinates and zone name
+          this.battlefield.updateLocation(serverPayload.mapId);
         }
       } catch (err) {
         console.error("[GameClient] Failed to decompress map data:", err);
@@ -306,6 +317,30 @@ export class GameClient {
           this.connection.send(
             encodeMessage(ClientMessageType.CHARACTER_MOVE_END, {}),
           );
+        }
+      }
+    );
+
+    // MAP_NEIGHBORS — preload adjacent map data for instant transitions
+    this.messageHandler.on(
+      ServerMessageType.MAP_NEIGHBORS,
+      async (payload: any) => {
+        const maps: ServerMapDataPayload[] = payload.maps ?? [];
+        console.log("[GameClient] MAP_NEIGHBORS: preloading", maps.length, "adjacent maps");
+
+        // Clear old preloaded maps
+        this.preloadedMaps.clear();
+
+        for (const mapPayload of maps) {
+          try {
+            const mapData = loadMapDataFromServer(mapPayload);
+            this.preloadedMaps.set(mapPayload.mapId, mapData);
+
+            // Pre-fetch tile textures in background
+            void this.battlefield?.prefetchMapTiles(mapData);
+          } catch (err) {
+            console.warn("[GameClient] Failed to preload map", mapPayload.mapId, err);
+          }
         }
       }
     );

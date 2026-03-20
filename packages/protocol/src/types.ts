@@ -39,6 +39,7 @@ export const ServerMessageType = {
   MAP_DATA: 0x20,
   MAP_ACTORS: 0x21,
   MAP_UPDATE: 0x22,
+  MAP_NEIGHBORS: 0x23,
   ACTOR_ADD: 0x30,
   ACTOR_REMOVE: 0x31,
   ACTOR_MOVE: 0x32,

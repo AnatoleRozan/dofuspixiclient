@@ -16,7 +16,7 @@ import {
   registerOnlineCharacter,
   unregisterOnlineCharacter,
 } from "../game/game-manager.ts";
-import { getCompressedMap, getMap } from "../maps/map-store.ts";
+import { getAdjacentMaps, getCompressedMap, getMap } from "../maps/map-store.ts";
 import { getPathfinding } from "../maps/pathfinding.ts";
 import { encodeServerMessage } from "../protocol/codec.ts";
 import { ServerMessageType } from "../protocol/types.ts";
@@ -129,6 +129,9 @@ export async function handleCharacterSelect(
         background: map.background,
         compressed: new Uint8Array(compressed),
         encoding: "gzip",
+        subareaId: map.superarea,
+        x: map.x,
+        y: map.y,
       })
     );
   }
@@ -161,6 +164,9 @@ export async function handleCharacterSelect(
   }
 
   transitionTo(session, SessionState.IN_WORLD);
+
+  // Send adjacent map data for preloading (non-blocking)
+  void sendNeighborMaps(session, character.map_id);
 }
 
 export async function handleLogout(session: ClientSession): Promise<void> {
@@ -184,4 +190,25 @@ export async function handleLogout(session: ClientSession): Promise<void> {
   session.characterName = null;
   session.mapId = null;
   session.cellId = null;
+}
+
+async function sendNeighborMaps(
+  session: ClientSession,
+  mapId: number
+): Promise<void> {
+  const neighbors = await getAdjacentMaps(mapId);
+  if (neighbors.length === 0) return;
+
+  const maps = neighbors.map((n) => ({
+    mapId: n.mapId,
+    width: n.width,
+    height: n.height,
+    background: n.background,
+    compressed: n.cellsGzip,
+    encoding: "gzip" as const,
+  }));
+
+  session.ws.send(
+    encodeServerMessage(ServerMessageType.MAP_NEIGHBORS, { maps })
+  );
 }

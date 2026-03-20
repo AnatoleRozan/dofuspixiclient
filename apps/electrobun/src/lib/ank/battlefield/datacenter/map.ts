@@ -78,6 +78,9 @@ export interface ServerMapDataPayload {
   compressed: Uint8Array;
   encoding: 'gzip';
   triggerCellIds?: number[];
+  subareaId?: number;
+  x?: number;
+  y?: number;
 }
 
 export function loadMapDataFromServer(payload: ServerMapDataPayload): MapData {
