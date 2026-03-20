@@ -12,6 +12,7 @@ import {
   handleMoveEnd,
   handleMovement,
 } from "../handlers/movement.ts";
+import { handleInteractNpc } from "../handlers/npc.ts";
 import { handleBoostStat, handleDebugGiveCapital } from "../handlers/stats.ts";
 import { decodeClientMessage, encodeServerMessage } from "../protocol/codec.ts";
 import { ClientMessageType, ServerMessageType } from "../protocol/types.ts";
@@ -61,6 +62,7 @@ export const gameWs = new Elysia().ws("/game", {
         .with(ClientMessageType.MAP_CHANGE, () => handleMapChange(session, msg.payload as any))
         .with(ClientMessageType.CHARACTER_BOOST_STAT, () => handleBoostStat(session, msg.payload as any))
         .with(ClientMessageType.DEBUG_GIVE_CAPITAL, () => handleDebugGiveCapital(session, msg.payload as any))
+        .with(ClientMessageType.INTERACT_NPC, () => handleInteractNpc(session, msg.payload as any))
         .with(ClientMessageType.PING, () => {
           ws.raw.send(encodeServerMessage(ServerMessageType.PONG, { time: Date.now() }));
         })

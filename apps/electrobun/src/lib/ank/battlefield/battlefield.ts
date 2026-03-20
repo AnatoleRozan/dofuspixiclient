@@ -15,6 +15,7 @@ import { DISPLAY_HEIGHT } from "@/constants/battlefield";
 import { type GameWorld, getGameWorld } from "@/ecs/world";
 import { Banner } from "@/hud/banner";
 import { initTooltipBounds } from "@/hud/core/tooltip";
+import { NpcDialogue } from "@/hud/dialogue";
 import { LocationDisplay } from "@/hud/location";
 import { StatsPanel } from "@/hud/stats";
 import { WorldMapPanel } from "@/hud/worldmap";
@@ -70,6 +71,8 @@ export interface WorldActorData {
   direction: number;
   look: string;
   isCurrentPlayer: boolean;
+  /** 0 = player, 1 = monster, 2 = NPC */
+  actorType?: number;
 }
 
 export interface BattlefieldConfig {
@@ -93,6 +96,7 @@ export class Battlefield {
   private statsPanel: StatsPanel | null = null;
   private worldMapPanel: WorldMapPanel | null = null;
   private locationDisplay: LocationDisplay | null = null;
+  private npcDialogue: NpcDialogue | null = null;
 
   private currentMapData: MapData | null = null;
   private cellDataMap: Map<number, CellData> = new Map();
@@ -131,6 +135,7 @@ export class Battlefield {
   private onCellClickCallback?: (cellId: number) => void;
   private onMinimapTeleportCallback?: (mapId: number) => void;
   private onBoostStatCallback?: (statId: number) => void;
+  private onNpcClickCallback?: (npcId: number) => void;
 
   private onResizeStartCallback?: () => void;
   private onResizeEndCallback?: () => void;
@@ -312,6 +317,10 @@ export class Battlefield {
       this.banner?.setStatsPressed(false);
     });
     this.app.stage.addChild(this.statsPanel.container);
+
+    // NPC dialogue panel — on top of everything
+    this.npcDialogue = new NpcDialogue();
+    this.app.stage.addChild(this.npcDialogue.container);
 
     initTooltipBounds(this.app);
 
@@ -585,17 +594,23 @@ export class Battlefield {
     }
 
     return (
-      this.worldActorRenderer?.addFighter({
-        id: data.id,
-        name: data.name,
-        team: data.isCurrentPlayer ? 1 : 0, // Blue for self, red for others
-        cellId: data.cellId,
-        direction: data.direction,
-        look: data.look,
-        hp: 100,
-        maxHp: 100,
-        isPlayer: data.isCurrentPlayer,
-      }) ?? Promise.resolve()
+      this.worldActorRenderer?.addFighter(
+        {
+          id: data.id,
+          name: data.name,
+          team: data.isCurrentPlayer ? 1 : 0,
+          cellId: data.cellId,
+          direction: data.direction,
+          look: data.look,
+          hp: 100,
+          maxHp: 100,
+          isPlayer: data.isCurrentPlayer,
+          actorType: data.actorType,
+        },
+        data.actorType === 2
+          ? () => this.onNpcClickCallback?.(data.id)
+          : undefined,
+      ) ?? Promise.resolve()
     );
   }
 
@@ -871,6 +886,20 @@ export class Battlefield {
     this.onBoostStatCallback = callback;
   }
 
+  setOnNpcClick(callback: (npcId: number) => void): void {
+    this.onNpcClickCallback = callback;
+  }
+
+  showNpcDialogue(npcName: string, messages: string[]): void {
+    if (!this.app || !this.npcDialogue) return;
+    this.npcDialogue.show(
+      npcName,
+      messages,
+      this.app.screen.width,
+      this.app.screen.height,
+    );
+  }
+
   getStatsPanel(): StatsPanel | null {
     return this.statsPanel;
   }
@@ -990,6 +1019,8 @@ export class Battlefield {
     this.statsPanel = null;
     this.locationDisplay?.destroy();
     this.locationDisplay = null;
+    this.npcDialogue?.destroy();
+    this.npcDialogue = null;
     this.worldMapPanel?.destroy();
     this.worldMapPanel = null;
     this.interactionHandler?.destroy();

@@ -85,6 +85,45 @@ export class MapInstance {
   }
 
   /**
+   * Check if an actor with the given ID exists.
+   */
+  hasActor(id: number): boolean {
+    return this.actors.has(id);
+  }
+
+  /**
+   * Add an NPC actor (no WebSocket session, type 2).
+   */
+  addNpc(
+    id: number,
+    name: string,
+    cellId: number,
+    direction: number,
+    look: string
+  ): void {
+    this.actors.set(id, {
+      id,
+      type: 2,
+      cellId,
+      direction,
+      name,
+      look,
+    });
+
+    // Broadcast to all current subscribers
+    const addPayload: ActorAddPayload = {
+      id,
+      type: 2,
+      cellId,
+      direction,
+      name,
+      look,
+    };
+    const msg = encodeServerMessage(ServerMessageType.ACTOR_ADD, addPayload);
+    this.broadcastToAll(msg);
+  }
+
+  /**
    * Add a monster actor (no WebSocket session).
    */
   addMonster(

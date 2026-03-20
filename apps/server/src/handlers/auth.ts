@@ -26,6 +26,7 @@ import {
   transitionTo,
 } from "../ws/client-session.ts";
 import { spawnMonstersForMap } from "../game/monster-spawner.ts";
+import { spawnNpcsForMap } from "../game/npc-spawner.ts";
 import { sendCharacterStats } from "./stats.ts";
 
 export async function handleLogin(
@@ -148,8 +149,9 @@ export async function handleCharacterSelect(
     look
   );
 
-  // Spawn monsters (idempotent) so they appear in MAP_ACTORS
+  // Spawn monsters and NPCs (idempotent) so they appear in MAP_ACTORS
   await spawnMonstersForMap(mapInstance, character.map_id);
+  spawnNpcsForMap(mapInstance, character.map_id);
 
   // Send all actors (including self and monsters) to the joining player
   const actors = mapInstance.getActors();

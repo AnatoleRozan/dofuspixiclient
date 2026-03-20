@@ -228,6 +228,7 @@ export class GameClient {
             direction: actor.direction,
             look: actor.look ?? "",
             isCurrentPlayer,
+            actorType: actor.type,
           });
           spritePromises.push(promise);
 
@@ -276,6 +277,7 @@ export class GameClient {
         direction: actor.direction,
         look: actor.look ?? "",
         isCurrentPlayer: actor.id === this.currentCharacter?.id,
+        actorType: actor.type,
       });
     });
 
@@ -321,6 +323,20 @@ export class GameClient {
       }
     );
 
+    // INTERACT_DIALOG — NPC dialogue from server
+    this.messageHandler.on(
+      ServerMessageType.INTERACT_DIALOG,
+      (payload: any) => {
+        const { npcName, messages } = payload as {
+          npcId: number;
+          npcName: string;
+          messages: string[];
+        };
+        console.log(`[GameClient] NPC dialogue from ${npcName}:`, messages);
+        this.battlefield?.showNpcDialogue(npcName, messages);
+      }
+    );
+
     // MAP_NEIGHBORS — preload adjacent map data for instant transitions
     this.messageHandler.on(
       ServerMessageType.MAP_NEIGHBORS,
@@ -352,6 +368,7 @@ export class GameClient {
     this.battlefield.setOnCellClick((cellId) => this.handleCellClick(cellId));
     this.battlefield.setOnMinimapTeleport((mapId) => this.handleMinimapTeleport(mapId));
     this.battlefield.setOnBoostStat((statId) => this.boostStat(statId));
+    this.battlefield.setOnNpcClick((npcId) => this.interactNpc(npcId));
 
     // If stats were received before battlefield was set, update the panel now
     if (this.currentStats) {
@@ -424,6 +441,13 @@ export class GameClient {
   boostStat(statId: number): void {
     this.connection.send(
       encodeMessage(ClientMessageType.CHARACTER_BOOST_STAT, { statId })
+    );
+  }
+
+  interactNpc(npcId: number): void {
+    console.log(`[GameClient] Interacting with NPC ${npcId}`);
+    this.connection.send(
+      encodeMessage(ClientMessageType.INTERACT_NPC, { npcId })
     );
   }
 

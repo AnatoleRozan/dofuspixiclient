@@ -57,6 +57,8 @@ export interface FighterSpriteData {
   hp: number;
   maxHp: number;
   isPlayer: boolean;
+  /** 0 = player, 1 = monster, 2 = NPC */
+  actorType?: number;
 }
 
 /**
@@ -175,8 +177,9 @@ export class FighterRenderer {
 
   /**
    * Add a fighter to the battlefield.
+   * @param onClickCallback Optional click handler (used for NPCs).
    */
-  addFighter(data: FighterSpriteData): Promise<void> {
+  addFighter(data: FighterSpriteData, onClickCallback?: () => void): Promise<void> {
     if (this.fighters.has(data.id)) {
       this.updateFighter(data.id, data);
       return Promise.resolve();
@@ -194,12 +197,23 @@ export class FighterRenderer {
     this.drawFighterPlaceholder(placeholderGraphics, data.team, data.direction);
     fighterContainer.addChild(placeholderGraphics);
 
-    // Name text
+    // Actor type: 0 = player, 1 = monster, 2 = NPC
+    const actorType = data.actorType ?? (data.id < 0 ? 1 : 0);
+    const isNpc = actorType === 2;
+    const isMonster = actorType === 1;
+
+    // Name text — color depends on actor type
+    const nameColor = data.isPlayer
+      ? 0x66ff66
+      : isNpc
+        ? 0xffff00  // Yellow for NPCs (faithful to Dofus 1.29)
+        : 0xffffff;
+
     const nameStyle = new TextStyle({
       fontFamily: "Arial",
       fontSize: 10,
       fontWeight: "bold",
-      fill: data.isPlayer ? 0x66ff66 : 0xffffff,
+      fill: nameColor,
       stroke: { color: 0x000000, width: 2 },
       align: "center",
     });
@@ -209,14 +223,22 @@ export class FighterRenderer {
     nameText.y = -50;
     fighterContainer.addChild(nameText);
 
-    // Monsters (negative IDs): name hidden by default, shown on hover
-    const isMonster = data.id < 0;
+    // Monsters: name hidden by default, shown on hover
     if (isMonster) {
       nameText.visible = false;
       fighterContainer.eventMode = "static";
       fighterContainer.cursor = "pointer";
       fighterContainer.on("pointerover", () => { nameText.visible = true; });
       fighterContainer.on("pointerout", () => { nameText.visible = false; });
+    }
+
+    // NPCs: name always visible, clickable to interact
+    if (isNpc) {
+      fighterContainer.eventMode = "static";
+      fighterContainer.cursor = "pointer";
+      if (onClickCallback) {
+        fighterContainer.on("pointertap", () => onClickCallback());
+      }
     }
 
     // HP bar (hidden for world actors in roleplay mode)
