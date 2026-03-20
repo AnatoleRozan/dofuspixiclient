@@ -121,13 +121,19 @@ const MAX_FRAME_MS = 125;
 const RUN_THRESHOLD = 6;
 
 /**
- * Parse gfxId from the look string (format: "gfx|color1|color2|color3").
+ * Parse gfxId from the look string (format: "gfx|tint|color2|color3").
  */
 function parseGfxId(look: string): number {
   if (!look) return 0;
   const parts = look.split("|");
   return parseInt(parts[0], 10) || 0;
 }
+
+/**
+ * Scale overrides per gfxId for monsters that are too large.
+ * Only add entries here for specific mobs that need resizing.
+ */
+const SPRITE_SCALE: Record<number, number> = {};
 
 /**
  * Fighter renderer.
@@ -203,6 +209,16 @@ export class FighterRenderer {
     nameText.y = -50;
     fighterContainer.addChild(nameText);
 
+    // Monsters (negative IDs): name hidden by default, shown on hover
+    const isMonster = data.id < 0;
+    if (isMonster) {
+      nameText.visible = false;
+      fighterContainer.eventMode = "static";
+      fighterContainer.cursor = "pointer";
+      fighterContainer.on("pointerover", () => { nameText.visible = true; });
+      fighterContainer.on("pointerout", () => { nameText.visible = false; });
+    }
+
     // HP bar (hidden for world actors in roleplay mode)
     const hpBar = new Graphics();
     hpBar.visible = false;
@@ -217,6 +233,13 @@ export class FighterRenderer {
     this.container.addChild(fighterContainer);
 
     const gfxId = parseGfxId(data.look);
+
+    // Scale specific monster sprites that are too large
+    const spriteScale = data.id < 0 ? SPRITE_SCALE[gfxId] : undefined;
+    if (spriteScale !== undefined) {
+      fighterContainer.scale.set(spriteScale);
+      nameText.scale.set(1 / spriteScale);
+    }
 
     const fighter: ActiveFighter = {
       id: data.id,

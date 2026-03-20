@@ -23,6 +23,7 @@ export class WorldMapPanel {
   private areaW = 0;
   private areaH = 0;
   private onClose?: () => void;
+  private onTeleport?: (mapId: number) => void;
 
   constructor(app: Application) {
     this.app = app;
@@ -94,6 +95,9 @@ export class WorldMapPanel {
     });
 
     this.renderer.setViewSize(this.areaW, this.areaH - HEADER_H);
+    if (this.onTeleport) {
+      this.renderer.setOnTeleport(this.onTeleport);
+    }
     await this.renderer.loadWorldMap(0);
     this.loaded = true;
   }
@@ -124,6 +128,11 @@ export class WorldMapPanel {
 
   setOnClose(fn: () => void): void {
     this.onClose = fn;
+  }
+
+  setOnTeleport(fn: (mapId: number) => void): void {
+    this.onTeleport = fn;
+    this.renderer?.setOnTeleport(fn);
   }
 
   destroy(): void {

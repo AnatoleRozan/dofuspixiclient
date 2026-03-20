@@ -18,7 +18,7 @@ import type {
   HintGroup,
 } from '@/types/worldmap';
 import { WORLDMAP_CONSTANTS, HINT_COLORS } from '@/types/worldmap';
-import { loadWorldMapData, mapCoordToPixel, filterHintsByArea } from './world-map-data';
+import { loadWorldMapData, mapCoordToPixel, pixelToMapCoord, findMapAtCoord, filterHintsByArea } from './world-map-data';
 import { animateSprite, animateTileSurface } from './animations';
 
 interface HintSprite extends Sprite, HintSpriteData {}
@@ -51,8 +51,13 @@ export class WorldMapRenderer {
   private currentZoom: number = WORLDMAP_CONSTANTS.DEFAULT_ZOOM;
 
   private isDragging = false;
+  private hasDragged = false;
   private dragStart = { x: 0, y: 0 };
+  private pointerDownPos = { x: 0, y: 0 };
+  private lastClickTime = 0;
+  private lastClickPos = { x: 0, y: 0 };
   private wheelHandler: ((e: WheelEvent) => void) | null = null;
+  private onTeleport?: (mapId: number) => void;
 
   private gridContainer: Container;
   private gridGraphics: Graphics;
@@ -173,8 +178,11 @@ export class WorldMapRenderer {
   private setupDragControl(): void {
     this.root.on('pointerdown', (e) => {
       this.isDragging = true;
+      this.hasDragged = false;
       this.dragStart.x = e.global.x - this.worldContainer.x;
       this.dragStart.y = e.global.y - this.worldContainer.y;
+      this.pointerDownPos.x = e.global.x;
+      this.pointerDownPos.y = e.global.y;
 
       if (this.app.canvas) {
         this.app.canvas.style.cursor = 'grabbing';
@@ -183,15 +191,34 @@ export class WorldMapRenderer {
 
     this.root.on('pointermove', (e) => {
       if (!this.isDragging) return;
+
+      const dx = e.global.x - this.pointerDownPos.x;
+      const dy = e.global.y - this.pointerDownPos.y;
+      if (dx * dx + dy * dy > 25) {
+        this.hasDragged = true;
+      }
+
       this.worldContainer.x = e.global.x - this.dragStart.x;
       this.worldContainer.y = e.global.y - this.dragStart.y;
       this.clampPosition();
     });
 
-    const stopDrag = () => {
+    const stopDrag = (e: import('pixi.js').FederatedPointerEvent) => {
       this.isDragging = false;
       if (this.app.canvas) {
         this.app.canvas.style.cursor = 'default';
+      }
+
+      if (!this.hasDragged) {
+        const now = performance.now();
+        if (now - this.lastClickTime < 400) {
+          this.handleDoubleClick(e.global.x, e.global.y);
+          this.lastClickTime = 0;
+        } else {
+          this.lastClickTime = now;
+          this.lastClickPos.x = e.global.x;
+          this.lastClickPos.y = e.global.y;
+        }
       }
     };
 
@@ -835,6 +862,30 @@ export class WorldMapRenderer {
 
   private hideTooltip(): void {
     this.tooltip.visible = false;
+  }
+
+  setOnTeleport(callback: (mapId: number) => void): void {
+    this.onTeleport = callback;
+  }
+
+  private handleDoubleClick(globalX: number, globalY: number): void {
+    const mapId = this.getMapIdAtPoint(globalX, globalY);
+    if (mapId !== null) {
+      console.log('[WorldMap] Double-click teleport to map', mapId);
+      this.onTeleport?.(mapId);
+    }
+  }
+
+  private getMapIdAtPoint(globalX: number, globalY: number): number | null {
+    if (!this.manifest || !this.mapCoordinates) return null;
+
+    const scale = this.currentZoom / 100;
+    const worldX = (globalX - this.worldContainer.x) / scale;
+    const worldY = (globalY - this.worldContainer.y) / scale;
+
+    const { bounds } = this.manifest;
+    const coord = pixelToMapCoord(worldX, worldY, bounds.xMin, bounds.yMin);
+    return findMapAtCoord(coord.x, coord.y, this.mapCoordinates);
   }
 
   show(): void {

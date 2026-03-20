@@ -1,4 +1,5 @@
 import type { ClientSession } from "../ws/client-session.ts";
+import { getServer } from "../ws/server-ref.ts";
 import { encodeServerMessage } from "../protocol/codec.ts";
 import {
   type ActorAddPayload,
@@ -13,7 +14,7 @@ interface MapActor {
   direction: number;
   name: string;
   look: string;
-  session: ClientSession;
+  session?: ClientSession;
 }
 
 export class MapInstance {
@@ -72,10 +73,64 @@ export class MapInstance {
       ServerMessageType.ACTOR_REMOVE,
       removePayload
     );
-    actor.session.ws.publish(this.topic, msg);
 
-    actor.session.ws.unsubscribe(this.topic);
+    if (actor.session) {
+      actor.session.ws.publish(this.topic, msg);
+      actor.session.ws.unsubscribe(this.topic);
+    } else {
+      this.broadcastToAll(msg);
+    }
+
     this.actors.delete(characterId);
+  }
+
+  /**
+   * Add a monster actor (no WebSocket session).
+   */
+  addMonster(
+    id: number,
+    name: string,
+    cellId: number,
+    direction: number,
+    look: string
+  ): void {
+    this.actors.set(id, {
+      id,
+      type: 1,
+      cellId,
+      direction,
+      name,
+      look,
+    });
+
+    // Broadcast to all current subscribers via server-level publish
+    const addPayload: ActorAddPayload = {
+      id,
+      type: 1,
+      cellId,
+      direction,
+      name,
+      look,
+    };
+    const msg = encodeServerMessage(ServerMessageType.ACTOR_ADD, addPayload);
+    this.broadcastToAll(msg);
+  }
+
+  /**
+   * Remove a monster actor.
+   */
+  removeMonster(monsterId: number): void {
+    const actor = this.actors.get(monsterId);
+    if (!actor) return;
+
+    const removePayload: ActorRemovePayload = { id: monsterId };
+    const msg = encodeServerMessage(
+      ServerMessageType.ACTOR_REMOVE,
+      removePayload
+    );
+    this.broadcastToAll(msg);
+
+    this.actors.delete(monsterId);
   }
 
   updateActorCell(
@@ -105,6 +160,14 @@ export class MapInstance {
     return result;
   }
 
+  /**
+   * Broadcast data to all subscribers of this map's topic via the Bun server.
+   * Works without needing a specific WebSocket session (used for monster broadcasts).
+   */
+  broadcastToAll(data: Uint8Array): void {
+    getServer().publish(this.topic, data);
+  }
+
   broadcast(data: Uint8Array, sender: ClientSession): void {
     sender.ws.publish(this.topic, data);
   }
@@ -113,7 +176,22 @@ export class MapInstance {
     return this.actors.size;
   }
 
+  /**
+   * Count only player actors (type === 0).
+   */
+  get playerCount(): number {
+    let count = 0;
+    for (const a of this.actors.values()) {
+      if (a.type === 0) count++;
+    }
+    return count;
+  }
+
+  /**
+   * A map is empty when there are no player actors.
+   * Monsters alone don't keep a map instance alive.
+   */
   isEmpty(): boolean {
-    return this.actors.size === 0;
+    return this.playerCount === 0;
   }
 }

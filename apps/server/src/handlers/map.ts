@@ -10,6 +10,7 @@ import {
   getMapInstance,
   getOrCreateMapInstance,
 } from "../game/game-manager.ts";
+import { spawnMonstersForMap } from "../game/monster-spawner.ts";
 import { getCompressedMap, getMap, mapExists } from "../maps/map-store.ts";
 import { getPathfinding } from "../maps/pathfinding.ts";
 import { encodeServerMessage } from "../protocol/codec.ts";
@@ -158,7 +159,10 @@ export async function changeMap(
     look
   );
 
-  // Send all actors (including self) to the joining player
+  // Spawn monsters (idempotent) so they appear in MAP_ACTORS
+  await spawnMonstersForMap(newInstance, newMapId);
+
+  // Send all actors (including self and monsters) to the joining player
   const actors = newInstance.getActors();
   session.ws.send(
     encodeServerMessage(ServerMessageType.MAP_ACTORS, { actors })

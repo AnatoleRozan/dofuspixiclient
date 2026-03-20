@@ -25,6 +25,7 @@ import {
   SessionState,
   transitionTo,
 } from "../ws/client-session.ts";
+import { spawnMonstersForMap } from "../game/monster-spawner.ts";
 import { sendCharacterStats } from "./stats.ts";
 
 export async function handleLogin(
@@ -144,7 +145,10 @@ export async function handleCharacterSelect(
     look
   );
 
-  // Send all actors (including self) to the joining player
+  // Spawn monsters (idempotent) so they appear in MAP_ACTORS
+  await spawnMonstersForMap(mapInstance, character.map_id);
+
+  // Send all actors (including self and monsters) to the joining player
   const actors = mapInstance.getActors();
   session.ws.send(
     encodeServerMessage(ServerMessageType.MAP_ACTORS, { actors })

@@ -67,6 +67,15 @@ export class EntityLifecycleSystem extends System {
       nameText.y = -50;
       container.addChild(nameText);
 
+      // Monsters: name hidden by default, shown on hover
+      if (look.entityType === 1) {
+        nameText.visible = false;
+        container.eventMode = "static";
+        container.cursor = "pointer";
+        container.on("pointerover", () => { nameText.visible = true; });
+        container.on("pointerout", () => { nameText.visible = false; });
+      }
+
       // Position at cell
       const pos = getCellPosition(cellPos.cellId, 15, cellPos.groundLevel);
       container.x = pos.x;

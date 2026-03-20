@@ -1,5 +1,6 @@
 import type { ClientSession } from "../ws/client-session.ts";
 import { MapInstance } from "./map-instance.ts";
+import { despawnMonstersForMap } from "./monster-spawner.ts";
 
 const mapInstances = new Map<number, MapInstance>();
 const onlineCharacters = new Map<number, ClientSession>();
@@ -20,6 +21,7 @@ export function getMapInstance(mapId: number): MapInstance | undefined {
 export function cleanupEmptyMap(mapId: number): void {
   const instance = mapInstances.get(mapId);
   if (instance?.isEmpty()) {
+    void despawnMonstersForMap(mapId);
     mapInstances.delete(mapId);
   }
 }

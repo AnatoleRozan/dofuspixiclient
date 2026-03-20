@@ -12,6 +12,7 @@ interface CachedMap {
   cells: unknown[];
   cellsGzip: Buffer;
   walkableIds: number[];
+  monsters: string;
 }
 
 const cache = new Map<number, CachedMap>();
@@ -32,6 +33,7 @@ async function loadFromDb(mapId: number): Promise<CachedMap | null> {
       "cells",
       "cells_gzip",
       "walkable_ids",
+      "monsters",
     ])
     .where("id", "=", mapId)
     .executeTakeFirst();
@@ -53,6 +55,7 @@ async function loadFromDb(mapId: number): Promise<CachedMap | null> {
     cells: cells as unknown[],
     cellsGzip: row.cells_gzip,
     walkableIds: row.walkable_ids,
+    monsters: row.monsters ?? "",
   };
 
   // LRU eviction

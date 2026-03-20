@@ -283,6 +283,10 @@ export class Battlefield {
     this.worldMapPanel = new WorldMapPanel(this.app);
     const gameAreaH = Math.floor(DISPLAY_HEIGHT * baseZoom);
     this.worldMapPanel.setArea(this.app.screen.width, gameAreaH);
+    this.worldMapPanel.setOnTeleport((mapId) => {
+      this.worldMapPanel?.hide();
+      this.onMinimapTeleportCallback?.(mapId);
+    });
     this.app.stage.addChild(this.worldMapPanel.container);
 
     // Banner — always on top of world map
